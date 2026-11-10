@@ -1,13 +1,16 @@
 const dns = require("dns").promises;
 const ipaddr = require("ipaddr.js");
 
-const BLOCKED_HOSTNAMES = new Set([
+const CLOUD_METADATA_HOSTNAMES = new Set([
+  "metadata.google.internal",
+  "instance-data",
+]);
+
+const LOCAL_HOSTNAMES = new Set([
   "localhost",
   "127.0.0.1",
   "::1",
   "0.0.0.0",
-  "metadata.google.internal",
-  "instance-data",
 ]);
 
 const DANGEROUS_PORTS = new Set([
@@ -17,9 +20,31 @@ const DANGEROUS_PORTS = new Set([
 ]);
 
 /**
+ * Determines whether local/internal probes are permitted.
+ * Enabled if ALLOW_LOCAL_PROBES="true" or when running in local development mode
+ * (unless explicitly disabled with ALLOW_LOCAL_PROBES="false").
+ */
+function isLocalAllowed(options = {}) {
+  if (options.allowLocal !== undefined) {
+    return Boolean(options.allowLocal);
+  }
+  // Automated test environments strictly enforce production SSRF defense
+  if (process.env.NODE_ENV === "test") {
+    return false;
+  }
+  if (process.env.ALLOW_LOCAL_PROBES === "true") {
+    return true;
+  }
+  if (process.env.NODE_ENV === "development" && process.env.ALLOW_LOCAL_PROBES !== "false") {
+    return true;
+  }
+  return false;
+}
+
+/**
  * Checks if an IP string is private, loopback, link-local, multicast, or reserved.
  */
-function isBlockedIp(ipString) {
+function isBlockedIp(ipString, options = {}) {
   try {
     let addr = ipaddr.parse(ipString);
 
@@ -29,10 +54,37 @@ function isBlockedIp(ipString) {
     }
 
     const range = addr.range();
+
+    // Link-local (including 169.254.x.x cloud metadata) is ALWAYS blocked
+    if (range === "linkLocal") {
+      return true;
+    }
+    if (addr.kind() === "ipv4") {
+      const octets = addr.toByteArray();
+      if (octets[0] === 169 && octets[1] === 254) {
+        return true; // AWS/GCP/Azure link-local metadata
+      }
+    }
+
+    const allowLocal = isLocalAllowed(options);
+    if (allowLocal) {
+      // In local mode, allow loopback and private LAN addresses, but strictly block non-routable/multicast
+      const strictlyForbidden = [
+        "carrierGradeNat",
+        "multicast",
+        "reserved",
+        "unspecified",
+        "broadcast",
+      ];
+      if (strictlyForbidden.includes(range)) {
+        return true;
+      }
+      return false;
+    }
+
     const blockedRanges = [
       "loopback",
       "private",
-      "linkLocal",
       "carrierGradeNat",
       "multicast",
       "reserved",
@@ -51,9 +103,6 @@ function isBlockedIp(ipString) {
       if (octets[0] === 0 || octets[0] === 127) {
         return true;
       }
-      if (octets[0] === 169 && octets[1] === 254) {
-        return true; // AWS/GCP/Azure link-local metadata
-      }
     }
 
     return false;
@@ -66,7 +115,7 @@ function isBlockedIp(ipString) {
  * Validates a target URL before monitoring or pinging.
  * Prevents SSRF attacks to internal infrastructure, private subnets, cloud metadata, and restricted ports.
  */
-async function validateUrlForMonitoring(urlString) {
+async function validateUrlForMonitoring(urlString, options = {}) {
   if (!urlString || typeof urlString !== "string") {
     return { valid: false, error: "URL is required" };
   }
@@ -85,21 +134,31 @@ async function validateUrlForMonitoring(urlString) {
 
   const hostname = parsed.hostname.toLowerCase();
 
-  // 2. Reject empty or forbidden hostnames
+  // 2. Reject empty hostname
   if (!hostname) {
     return { valid: false, error: "Hostname cannot be empty" };
   }
 
-  if (BLOCKED_HOSTNAMES.has(hostname) || hostname.endsWith(".localhost") || hostname.endsWith(".local") || hostname.endsWith(".internal")) {
-    return { valid: false, error: "Access to localhost or internal network hostnames is prohibited" };
-  }
-
-  // 3. Reject cloud metadata IP
-  if (hostname === "169.254.169.254") {
+  // 3. Reject cloud metadata endpoints (always prohibited)
+  if (CLOUD_METADATA_HOSTNAMES.has(hostname) || hostname === "169.254.169.254") {
     return { valid: false, error: "Access to cloud metadata endpoints is prohibited" };
   }
 
-  // 4. Validate Port
+  const allowLocal = isLocalAllowed(options);
+
+  // 4. In strict mode, reject localhost and internal network hostnames
+  if (!allowLocal) {
+    if (
+      LOCAL_HOSTNAMES.has(hostname) ||
+      hostname.endsWith(".localhost") ||
+      hostname.endsWith(".local") ||
+      hostname.endsWith(".internal")
+    ) {
+      return { valid: false, error: "Access to localhost or internal network hostnames is prohibited" };
+    }
+  }
+
+  // 5. Validate Port
   const port = parsed.port ? parseInt(parsed.port, 10) : parsed.protocol === "https:" ? 443 : 80;
   if (isNaN(port) || port < 1 || port > 65535) {
     return { valid: false, error: "Invalid port number" };
@@ -109,13 +168,13 @@ async function validateUrlForMonitoring(urlString) {
     return { valid: false, error: `Access to port ${port} is restricted for security` };
   }
 
-  // 5. If hostname is already a raw IP (v4 or v6), check directly
+  // 6. If hostname is already a raw IP (v4 or v6), check directly
   if (ipaddr.isValid(hostname)) {
-    if (isBlockedIp(hostname)) {
+    if (isBlockedIp(hostname, options)) {
       return { valid: false, error: "Access to private, loopback, or internal IP addresses is prohibited" };
     }
-  } else {
-    // 6. Perform DNS lookup to inspect resolved IPs
+  } else if (!allowLocal || (hostname !== "localhost" && !hostname.endsWith(".localhost"))) {
+    // 7. Perform DNS lookup to inspect resolved IPs
     try {
       const addresses = await dns.lookup(hostname, { all: true });
       if (!addresses || addresses.length === 0) {
@@ -123,7 +182,7 @@ async function validateUrlForMonitoring(urlString) {
       }
 
       for (const entry of addresses) {
-        if (isBlockedIp(entry.address)) {
+        if (isBlockedIp(entry.address, options)) {
           return {
             valid: false,
             error: "Hostname resolves to a private, loopback, or internal network address",
@@ -144,5 +203,6 @@ async function validateUrlForMonitoring(urlString) {
 module.exports = {
   isBlockedIp,
   validateUrlForMonitoring,
+  isLocalAllowed,
 };
 

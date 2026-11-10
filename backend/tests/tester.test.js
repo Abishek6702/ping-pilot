@@ -44,11 +44,11 @@ describe("API Tester Endpoint: POST /api/tester/run", () => {
     expect(res.body.error).toContain("URL is required");
   });
 
-  it("rejects SSRF private / loopback IP URLs", async () => {
+  it("rejects SSRF cloud metadata endpoints", async () => {
     const res = await request(app)
       .post("/api/tester/run")
       .set("Authorization", `Bearer ${authToken}`)
-      .send({ url: "http://127.0.0.1:8080", method: "GET" });
+      .send({ url: "http://169.254.169.254/latest/meta-data/", method: "GET" });
 
     expect(res.status).toBe(400);
     expect(res.body.error).toContain("SSRF Blocked");

@@ -46,6 +46,11 @@ function validateEnv() {
     process.env.ALLOW_PUBLIC_REGISTRATION = "true";
   }
 
+  // Allow local/private network probing in development mode or when explicitly set
+  if (process.env.ALLOW_LOCAL_PROBES === undefined) {
+    process.env.ALLOW_LOCAL_PROBES = process.env.NODE_ENV === "development" ? "true" : "false";
+  }
+
   // Configure reliable DNS servers fallback for MongoDB SRV lookups
   try {
     dns.setServers(["8.8.8.8", "8.8.4.4", "1.1.1.1"]);

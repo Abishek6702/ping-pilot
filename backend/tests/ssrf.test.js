@@ -64,5 +64,22 @@ describe("SSRF Protection & URL Validation", () => {
     const redisPort = await validateUrlForMonitoring("http://example.com:6379/data");
     expect(redisPort.valid).toBe(false);
   });
+
+  test("allows localhost and loopback when allowLocal is true", async () => {
+    const localhostRes = await validateUrlForMonitoring("http://localhost:4002/api/health", { allowLocal: true });
+    expect(localhostRes.valid).toBe(true);
+
+    const loopbackRes = await validateUrlForMonitoring("http://127.0.0.1:4002/api/health", { allowLocal: true });
+    expect(loopbackRes.valid).toBe(true);
+
+    // Dangerous port on localhost must STILL be blocked
+    const dangerousLocal = await validateUrlForMonitoring("http://localhost:27017/db", { allowLocal: true });
+    expect(dangerousLocal.valid).toBe(false);
+    expect(dangerousLocal.error).toContain("restricted for security");
+
+    // Cloud metadata must STILL be blocked
+    const cloudMetadata = await validateUrlForMonitoring("http://169.254.169.254/latest/meta-data/", { allowLocal: true });
+    expect(cloudMetadata.valid).toBe(false);
+  });
 });
 

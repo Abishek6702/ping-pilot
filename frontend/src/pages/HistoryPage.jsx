@@ -9,6 +9,10 @@ import {
   ChevronLeft,
   ChevronRight,
   CheckCircle2,
+  Layers,
+  X,
+  Clock,
+  Activity,
 } from "lucide-react";
 import toast from "react-hot-toast";
 
@@ -27,6 +31,7 @@ export default function HistoryPage() {
   const [historyData, setHistoryData] = useState(null);
   const [loading, setLoading] = useState(true);
 
+  // Filter states
   const [selectedMonitor, setSelectedMonitor] = useState("");
   const [selectedStatus, setSelectedStatus] = useState("ALL");
   const [timeRange, setTimeRange] = useState("24h");
@@ -35,7 +40,7 @@ export default function HistoryPage() {
   // Direct fetch for monitor list (for dropdown filter)
   const loadMonitors = useCallback(async () => {
     try {
-      const res = await fetch(`${API_URL}/monitors`, {
+      const res = await fetch(`${API_URL}/monitors?limit=100`, {
         headers: getHeaders(),
         credentials: "include",
       });
@@ -87,91 +92,151 @@ export default function HistoryPage() {
   const results = historyData?.history || [];
   const pagination = historyData?.pagination || { page: 1, limit: 30, total: 0, pages: 1 };
 
+  const currentSelectedMonitorObj = monitors.find((m) => m._id === selectedMonitor);
+  const hasActiveFilters = selectedMonitor !== "" || selectedStatus !== "ALL" || timeRange !== "24h";
+
+  const handleClearFilters = () => {
+    setSelectedMonitor("");
+    setSelectedStatus("ALL");
+    setTimeRange("24h");
+    setPage(1);
+  };
+
   return (
-    <div className="space-y-6">
-      {/* Header */}
+    <div className="space-y-5">
+      {/* Page Header */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
-          <h2 className="text-xl font-bold tracking-tight text-slate-900 dark:text-white">
-            Monitoring History
-          </h2>
+          <div className="flex items-center gap-2">
+            <h2 className="text-xl font-bold tracking-tight text-slate-900 dark:text-white">
+              Monitoring History
+            </h2>
+            <span className="px-2 py-0.5 rounded-full text-[11px] font-semibold bg-[#0E7A88]/10 text-[#0E7A88]">
+              {pagination.total || 0} checks
+            </span>
+          </div>
           <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
-            Audit logs and historical ping results across all monitored endpoints (30-day retention).
+            Real-time audit logs and historical ping results across your services (30-day retention).
           </p>
         </div>
 
         <button
           type="button"
           onClick={loadHistory}
-          className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-slate-700 dark:text-slate-300 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 hover:bg-slate-50 dark:hover:bg-slate-800 rounded-lg transition-colors cursor-pointer self-start sm:self-auto"
+          className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-slate-700 dark:text-slate-200 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-700/60 rounded-lg transition-colors cursor-pointer self-start sm:self-auto shadow-xs"
         >
           <RefreshCw className={`w-3.5 h-3.5 ${loading ? "animate-spin text-[#0E7A88]" : ""}`} />
           <span>Refresh</span>
         </button>
       </div>
 
-      {/* Filter Toolbar */}
+      {/* Filter Control Bar */}
       <Card className="p-4">
-        <div className="flex flex-col sm:flex-row flex-wrap items-center gap-3 text-xs">
-          {/* Select Monitor */}
-          <div className="w-full sm:w-auto flex-1 min-w-[200px]">
-            <label className="block text-[11px] font-semibold text-slate-400 mb-1">
-              Filter by Service
-            </label>
-            <select
-              value={selectedMonitor}
-              onChange={(e) => {
-                setSelectedMonitor(e.target.value);
-                setPage(1);
-              }}
-              className="w-full px-3 py-1.5 text-xs bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#0E7A88] text-slate-900 dark:text-white"
-            >
-              <option value="">All Services</option>
-              {monitors.map((m) => (
-                <option key={m._id} value={m._id}>
-                  {m.name}
-                </option>
-              ))}
-            </select>
+        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3 text-xs">
+          {/* Filters Group */}
+          <div className="flex flex-wrap items-center gap-3 flex-1">
+            {/* 1. Service Dropdown Filter */}
+            <div className="w-full sm:w-auto min-w-[220px]">
+              <label className="block text-[11px] font-bold text-slate-500 dark:text-slate-400 mb-1 flex items-center gap-1">
+                <Layers className="w-3.5 h-3.5 text-[#0E7A88]" />
+                <span>Filter by Service</span>
+              </label>
+              <select
+                value={selectedMonitor}
+                onChange={(e) => {
+                  setSelectedMonitor(e.target.value);
+                  setPage(1);
+                }}
+                className="w-full px-3 py-2 text-xs font-medium bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#0E7A88] text-slate-900 dark:text-white cursor-pointer"
+              >
+                <option value="">All Services ({monitors.length})</option>
+                {monitors.map((m) => (
+                  <option key={m._id} value={m._id}>
+                    {m.name} ({m.currentStatus || "UP"})
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            {/* 2. Status Dropdown Filter */}
+            <div className="w-full sm:w-auto min-w-[140px]">
+              <label className="block text-[11px] font-bold text-slate-500 dark:text-slate-400 mb-1 flex items-center gap-1">
+                <Activity className="w-3.5 h-3.5 text-[#0E7A88]" />
+                <span>Result Status</span>
+              </label>
+              <select
+                value={selectedStatus}
+                onChange={(e) => {
+                  setSelectedStatus(e.target.value);
+                  setPage(1);
+                }}
+                className="w-full px-3 py-2 text-xs font-medium bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#0E7A88] text-slate-900 dark:text-white cursor-pointer"
+              >
+                <option value="ALL">All Statuses</option>
+                <option value="UP">Success (UP)</option>
+                <option value="DOWN">Failure (DOWN)</option>
+              </select>
+            </div>
+
+            {/* 3. Time Window Filter */}
+            <div className="w-full sm:w-auto min-w-[140px]">
+              <label className="block text-[11px] font-bold text-slate-500 dark:text-slate-400 mb-1 flex items-center gap-1">
+                <Clock className="w-3.5 h-3.5 text-[#0E7A88]" />
+                <span>Time Window</span>
+              </label>
+              <select
+                value={timeRange}
+                onChange={(e) => {
+                  setTimeRange(e.target.value);
+                  setPage(1);
+                }}
+                className="w-full px-3 py-2 text-xs font-medium bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#0E7A88] text-slate-900 dark:text-white cursor-pointer"
+              >
+                <option value="24h">Past 24 Hours</option>
+                <option value="7d">Past 7 Days</option>
+                <option value="30d">Past 30 Days</option>
+              </select>
+            </div>
           </div>
 
-          {/* Select Status */}
-          <div className="w-full sm:w-auto min-w-[130px]">
-            <label className="block text-[11px] font-semibold text-slate-400 mb-1">
-              Result Status
-            </label>
-            <select
-              value={selectedStatus}
-              onChange={(e) => {
-                setSelectedStatus(e.target.value);
-                setPage(1);
-              }}
-              className="w-full px-3 py-1.5 text-xs bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#0E7A88] text-slate-900 dark:text-white"
-            >
-              <option value="ALL">All Statuses</option>
-              <option value="UP">Success (UP)</option>
-              <option value="DOWN">Failure (DOWN)</option>
-            </select>
-          </div>
+          {/* Active Filter Badges & Reset Button */}
+          {hasActiveFilters && (
+            <div className="flex items-center gap-2 pt-2 lg:pt-0 border-t lg:border-t-0 border-slate-100 dark:border-slate-800 self-start lg:self-end">
+              {currentSelectedMonitorObj && (
+                <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md text-xs font-semibold bg-[#0E7A88]/10 text-[#0E7A88]">
+                  <span>Service: {currentSelectedMonitorObj.name}</span>
+                  <button
+                    type="button"
+                    onClick={() => setSelectedMonitor("")}
+                    className="hover:opacity-75 cursor-pointer ml-1"
+                  >
+                    <X className="w-3 h-3" />
+                  </button>
+                </span>
+              )}
 
-          {/* Time range */}
-          <div className="w-full sm:w-auto min-w-[130px]">
-            <label className="block text-[11px] font-semibold text-slate-400 mb-1">
-              Time Window
-            </label>
-            <select
-              value={timeRange}
-              onChange={(e) => {
-                setTimeRange(e.target.value);
-                setPage(1);
-              }}
-              className="w-full px-3 py-1.5 text-xs bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#0E7A88] text-slate-900 dark:text-white"
-            >
-              <option value="24h">Past 24 Hours</option>
-              <option value="7d">Past 7 Days</option>
-              <option value="30d">Past 30 Days</option>
-            </select>
-          </div>
+              {selectedStatus !== "ALL" && (
+                <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md text-xs font-semibold bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300">
+                  <span>Status: {selectedStatus}</span>
+                  <button
+                    type="button"
+                    onClick={() => setSelectedStatus("ALL")}
+                    className="hover:opacity-75 cursor-pointer ml-1"
+                  >
+                    <X className="w-3 h-3" />
+                  </button>
+                </span>
+              )}
+
+              <button
+                type="button"
+                onClick={handleClearFilters}
+                className="text-xs text-rose-500 hover:text-rose-600 font-semibold underline cursor-pointer pl-1"
+              >
+                Reset All
+              </button>
+            </div>
+          )}
         </div>
       </Card>
 
@@ -182,14 +247,18 @@ export default function HistoryPage() {
         ) : results.length === 0 ? (
           <EmptyState
             icon={HistoryIcon}
-            title="No history logs found"
-            description="No check results matching the specified filters were found in the last 30 days."
+            title={selectedMonitor ? "No logs for this service" : "No history logs found"}
+            description={
+              selectedMonitor
+                ? `No check results were found for "${currentSelectedMonitorObj?.name || "selected service"}" in the selected time range.`
+                : "No check results matching the specified filters were found in the last 30 days."
+            }
           />
         ) : (
           <div className="overflow-x-auto">
             <table className="w-full text-left text-xs border-collapse">
               <thead>
-                <tr className="border-b border-slate-200 dark:border-slate-800 text-[11px] font-semibold text-slate-400 uppercase tracking-wider">
+                <tr className="border-b border-slate-200 dark:border-slate-800 text-[11px] font-semibold text-slate-400 uppercase tracking-wider bg-slate-50/50 dark:bg-slate-800/30">
                   <th className="py-3 px-4">Service</th>
                   <th className="py-3 px-4">Status</th>
                   <th className="py-3 px-4">HTTP Status</th>
@@ -202,7 +271,19 @@ export default function HistoryPage() {
                 {results.map((log) => (
                   <tr key={log._id} className="hover:bg-slate-50/50 dark:hover:bg-slate-800/20">
                     <td className="py-3 px-4 font-medium text-slate-900 dark:text-white">
-                      {log.monitorId?.name || "Deleted Service"}
+                      <button
+                        type="button"
+                        onClick={() => {
+                          if (log.monitorId?._id) {
+                            setSelectedMonitor(log.monitorId._id);
+                            setPage(1);
+                          }
+                        }}
+                        className="hover:text-[#0E7A88] dark:hover:text-[#38b2ac] hover:underline cursor-pointer text-left font-semibold"
+                        title="Click to filter by this service"
+                      >
+                        {log.monitorId?.name || "Deleted Service"}
+                      </button>
                     </td>
                     <td className="py-3 px-4">
                       <StatusBadge status={log.status} size="sm" />
@@ -220,7 +301,7 @@ export default function HistoryPage() {
                       {log.errorMessage ? (
                         <span className="text-rose-500">{log.errorMessage}</span>
                       ) : (
-                        <span className="text-emerald-500 flex items-center gap-1">
+                        <span className="text-emerald-500 flex items-center gap-1 font-medium">
                           <CheckCircle2 className="w-3.5 h-3.5" /> Success
                         </span>
                       )}

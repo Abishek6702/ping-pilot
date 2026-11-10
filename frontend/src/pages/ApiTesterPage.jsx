@@ -44,6 +44,21 @@ const METHOD_COLORS = {
   ALL: "bg-[#e8f7f8] text-[#0E7A88] dark:bg-[#0E7A88]/20 dark:text-[#38b2ac] border-[#0E7A88]/30",
 };
 
+// Safe helper to extract hostname without throwing on partial/editing URLs
+const getSafeHostname = (inputUrl) => {
+  if (!inputUrl || typeof inputUrl !== "string") return "My Service";
+  try {
+    const candidate =
+      inputUrl.startsWith("http://") || inputUrl.startsWith("https://")
+        ? inputUrl
+        : `https://${inputUrl}`;
+    const parsed = new URL(candidate);
+    return parsed.hostname || "My Service";
+  } catch (_e) {
+    return "My Service";
+  }
+};
+
 export default function ApiTesterPage() {
   const [url, setUrl] = useState("https://httpbin.org/get");
   const [method, setMethod] = useState("GET");
@@ -643,8 +658,8 @@ export default function ApiTesterPage() {
         onSubmit={handleSaveAsMonitor}
         loading={modalLoading}
         initialData={{
-          name: new URL(url.startsWith("http") ? url : `https://${url}`).hostname || "My Service",
-          url: url.trim(),
+          name: getSafeHostname(url),
+          url: url ? url.trim() : "",
           method: "GET",
           timeout: 15,
           expectedStatusCodes: [200],
