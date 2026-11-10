@@ -10,9 +10,11 @@ const DEFAULT_SETTINGS = {
 };
 
 function getAdminEmails() {
+  const adminEnvList = (process.env.ADMIN_EMAIL || "").split(/[,;\s]+/).filter(Boolean);
+  const emailEnvList = (process.env.EMAIL || "").split(/[,;\s]+/).filter(Boolean);
   const configured = [
-    process.env.ADMIN_EMAIL,
-    process.env.EMAIL,
+    ...adminEnvList,
+    ...emailEnvList,
     "abishekkrishnat@gmail.com",
     "abishek.k@sece.ac.in",
   ];

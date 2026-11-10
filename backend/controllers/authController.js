@@ -18,7 +18,7 @@ async function login(req, res, next) {
     const adminEmails = getAdminEmails();
     const isConfiguredAdmin = adminEmails.includes(normalizedEmail);
 
-    const isPublicRegistrationEnabled = process.env.ALLOW_PUBLIC_REGISTRATION === "true";
+    const isPublicRegistrationEnabled = process.env.ALLOW_PUBLIC_REGISTRATION !== "false";
 
     // Enforce single-admin policy only if public registration is not enabled
     if (!isPublicRegistrationEnabled && !isConfiguredAdmin) {
@@ -90,7 +90,7 @@ async function login(req, res, next) {
  */
 async function register(req, res, next) {
   try {
-    const isPublicRegistrationEnabled = process.env.ALLOW_PUBLIC_REGISTRATION === "true";
+    const isPublicRegistrationEnabled = process.env.ALLOW_PUBLIC_REGISTRATION !== "false";
     if (!isPublicRegistrationEnabled) {
       return res.status(403).json({
         success: false,
@@ -179,7 +179,7 @@ async function googleLogin(req, res, next) {
     const adminEmails = getAdminEmails();
     const isConfiguredAdmin = adminEmails.includes(googleEmail);
 
-    const isPublicRegistrationEnabled = process.env.ALLOW_PUBLIC_REGISTRATION === "true";
+    const isPublicRegistrationEnabled = process.env.ALLOW_PUBLIC_REGISTRATION !== "false";
 
     // Enforce single-admin policy only if public registration is not enabled
     if (!isPublicRegistrationEnabled && !isConfiguredAdmin) {

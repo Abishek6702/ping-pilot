@@ -41,6 +41,11 @@ function validateEnv() {
     process.env.FRONTEND_URL = "http://localhost:4000";
   }
 
+  // Default public registration to true so external users and Google OAuth can sign up
+  if (process.env.ALLOW_PUBLIC_REGISTRATION === undefined) {
+    process.env.ALLOW_PUBLIC_REGISTRATION = "true";
+  }
+
   // Configure reliable DNS servers fallback for MongoDB SRV lookups
   try {
     dns.setServers(["8.8.8.8", "8.8.4.4", "1.1.1.1"]);
