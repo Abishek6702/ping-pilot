@@ -1,4 +1,5 @@
-require("dotenv").config();
+const path = require("path");
+require("dotenv").config({ path: path.join(__dirname, ".env") });
 const express = require("express");
 const cors = require("cors");
 const helmet = require("helmet");
@@ -16,6 +17,7 @@ const dashboardRoutes = require("./routes/dashboardRoutes");
 const historyRoutes = require("./routes/historyRoutes");
 const settingsRoutes = require("./routes/settingsRoutes");
 const workerRoutes = require("./routes/workerRoutes");
+const adminRoutes = require("./routes/adminRoutes");
 
 const app = express();
 
@@ -36,8 +38,9 @@ const defaultAllowedOrigins = [
   "http://localhost:5173",
   "http://localhost:3000",
   "http://localhost:4000",
+  "http://localhost:4002",
+  "http://localhost:5000",
   "http://localhost:8080",
-  "http://localhost:6000",
 ];
 
 const customOrigins = (process.env.FRONTEND_URL || "")
@@ -95,6 +98,7 @@ app.use("/api/monitors", monitorRoutes);
 app.use("/api/dashboard", dashboardRoutes);
 app.use("/api/history", historyRoutes);
 app.use("/api/settings", settingsRoutes);
+app.use("/api/admin", adminRoutes);
 app.use("/api/internal", workerRoutes);
 
 // --- ERROR HANDLING ---

@@ -38,8 +38,8 @@ export default function ResponseTimeChart({ data = [], height = 260 }) {
         <AreaChart data={data} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
           <defs>
             <linearGradient id="responseTimeGrad" x1="0" y1="0" x2="0" y2="1">
-              <stop offset="5%" stopColor="#2563eb" stopOpacity={0.3} />
-              <stop offset="95%" stopColor="#2563eb" stopOpacity={0.0} />
+              <stop offset="5%" stopColor="#0E7A88" stopOpacity={0.35} />
+              <stop offset="95%" stopColor="#0E7A88" stopOpacity={0.0} />
             </linearGradient>
           </defs>
           <CartesianGrid
@@ -77,7 +77,7 @@ export default function ResponseTimeChart({ data = [], height = 260 }) {
           <Area
             type="monotone"
             dataKey="avgResponseTime"
-            stroke="#2563eb"
+            stroke="#0E7A88"
             strokeWidth={2}
             fillOpacity={1}
             fill="url(#responseTimeGrad)"

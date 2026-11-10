@@ -14,7 +14,7 @@ const { validateMonitorInput, validateMonitorUpdate } = require("../middleware/v
 
 const router = express.Router();
 
-router.use(protect, adminOnly);
+router.use(protect);
 
 router.route("/")
   .get(getMonitors)

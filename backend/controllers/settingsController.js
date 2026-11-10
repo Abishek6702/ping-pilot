@@ -65,16 +65,25 @@ async function updateSettings(req, res, next) {
       updates.failureThreshold = Number(failureThreshold);
     }
 
-    for (const [key, value] of Object.entries(updates)) {
-      await SystemSetting.findOneAndUpdate(
-        { key },
-        { value, updatedAt: new Date() },
-        { upsert: true, new: true }
-      );
+    if (Object.keys(updates).length > 0) {
+      if (req.user && req.user.role !== "admin") {
+        return res.status(403).json({
+          success: false,
+          error: "Only system administrators can modify platform-wide probe settings",
+        });
+      }
+
+      for (const [key, value] of Object.entries(updates)) {
+        await SystemSetting.findOneAndUpdate(
+          { key },
+          { value, updatedAt: new Date() },
+          { upsert: true, new: true }
+        );
+      }
     }
 
     if (name && req.user) {
-      req.user.name = name;
+      req.user.name = name.trim();
       await req.user.save();
     }
 

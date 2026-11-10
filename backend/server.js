@@ -1,7 +1,8 @@
+const path = require("path");
 const dotenv = require("dotenv");
 
-// Load env vars before requiring anything else
-dotenv.config();
+// Load env vars from backend/.env regardless of current working directory
+dotenv.config({ path: path.join(__dirname, ".env") });
 
 const validateEnv = require("./config/validateEnv");
 validateEnv();
@@ -22,7 +23,7 @@ async function start() {
 
     stopRecurringWorker = startRecurringWorker({ logger: console });
 
-    server = app.listen(PORT, () => {
+    server = app.listen(PORT, "0.0.0.0", () => {
       console.log(`🚀 PingPilot Server running in ${process.env.NODE_ENV || "development"} mode on port ${PORT}`);
     });
   } catch (error) {

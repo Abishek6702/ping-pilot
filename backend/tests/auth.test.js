@@ -28,6 +28,10 @@ describe("Authentication & Authorization System", () => {
 
   describe("POST /api/auth/login", () => {
     test("rejects login if email is not the configured admin email", async () => {
+      jest.spyOn(User, "findOne").mockReturnValue({
+        select: jest.fn().mockResolvedValue(null),
+      });
+
       const res = await request(app)
         .post("/api/auth/login")
         .send({ email: "intruder@evil.com", password: "Password123!" });
@@ -134,6 +138,82 @@ describe("Authentication & Authorization System", () => {
       const res = await request(app).post("/api/auth/logout");
       expect(res.status).toBe(200);
       expect(res.body.success).toBe(true);
+    });
+  });
+
+  describe("Password Reset & Change Workflows", () => {
+    test("rejects forgot-password for Google-only accounts", async () => {
+      jest.spyOn(User, "findOne").mockReturnValue({
+        select: jest.fn().mockResolvedValue({
+          _id: "507f1f77bcf86cd799439033",
+          email: "googleuser@gmail.com",
+          authProviders: ["google"],
+        }),
+      });
+
+      const res = await request(app)
+        .post("/api/auth/forgot-password")
+        .send({ email: "googleuser@gmail.com" });
+
+      expect(res.status).toBe(400);
+      expect(res.body.success).toBe(false);
+      expect(res.body.error).toContain("Google Sign-In");
+    });
+
+    test("allows forgot-password for local auth accounts", async () => {
+      const mockUser = {
+        _id: "507f1f77bcf86cd799439011",
+        name: "Admin",
+        email: "admin@pingpilot.local",
+        authProviders: ["local"],
+        save: jest.fn().mockResolvedValue(true),
+      };
+
+      jest.spyOn(User, "findOne").mockReturnValue({
+        select: jest.fn().mockResolvedValue(mockUser),
+      });
+
+      const res = await request(app)
+        .post("/api/auth/forgot-password")
+        .send({ email: "admin@pingpilot.local" });
+
+      expect(res.status).toBe(200);
+      expect(res.body.success).toBe(true);
+      expect(res.body.message).toContain("sent to your email");
+    });
+
+    test("allows authenticated change-password for both admin and users", async () => {
+      const mockUser = {
+        _id: "507f1f77bcf86cd799439011",
+        email: "admin@pingpilot.local",
+        role: "admin",
+        isActive: true,
+        password: "OldHashedPassword",
+        authProviders: ["local"],
+        comparePassword: jest.fn().mockResolvedValue(true),
+        save: jest.fn().mockResolvedValue(true),
+      };
+
+      jest.spyOn(User, "findById").mockImplementation((id) => ({
+        select: jest.fn().mockResolvedValue(mockUser),
+        _id: id,
+        role: "admin",
+        isActive: true,
+      }));
+
+      const token = generateToken({ id: mockUser._id, role: mockUser.role, email: mockUser.email });
+
+      const res = await request(app)
+        .post("/api/auth/change-password")
+        .set("Authorization", `Bearer ${token}`)
+        .send({
+          currentPassword: "OldPassword123!",
+          newPassword: "NewSuperPassword123!",
+        });
+
+      expect(res.status).toBe(200);
+      expect(res.body.success).toBe(true);
+      expect(res.body.message).toContain("Password changed successfully");
     });
   });
 });

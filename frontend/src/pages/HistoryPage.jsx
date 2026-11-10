@@ -1,6 +1,4 @@
 import React, { useEffect, useState, useCallback } from "react";
-import { useDispatch, useSelector } from "react-redux";
-import { fetchHistory, fetchMonitors } from "../store/slices/monitorsSlice";
 import Card from "../components/common/Card";
 import StatusBadge from "../components/common/StatusBadge";
 import EmptyState from "../components/common/EmptyState";
@@ -12,31 +10,75 @@ import {
   ChevronRight,
   CheckCircle2,
 } from "lucide-react";
+import toast from "react-hot-toast";
+
+const API_URL = import.meta.env.VITE_API_URL || "http://localhost:4001/api";
+
+const getHeaders = () => {
+  const token = localStorage.getItem("pingpilot_token");
+  return {
+    "Content-Type": "application/json",
+    ...(token ? { Authorization: `Bearer ${token}` } : {}),
+  };
+};
 
 export default function HistoryPage() {
-  const dispatch = useDispatch();
-  const { historyData, loading, items: monitors } = useSelector((state) => state.monitors);
+  const [monitors, setMonitors] = useState([]);
+  const [historyData, setHistoryData] = useState(null);
+  const [loading, setLoading] = useState(true);
 
   const [selectedMonitor, setSelectedMonitor] = useState("");
   const [selectedStatus, setSelectedStatus] = useState("ALL");
   const [timeRange, setTimeRange] = useState("24h");
   const [page, setPage] = useState(1);
 
-  useEffect(() => {
-    dispatch(fetchMonitors());
-  }, [dispatch]);
+  // Direct fetch for monitor list (for dropdown filter)
+  const loadMonitors = useCallback(async () => {
+    try {
+      const res = await fetch(`${API_URL}/monitors`, {
+        headers: getHeaders(),
+        credentials: "include",
+      });
+      const data = await res.json();
+      if (data.success) {
+        setMonitors(data.monitors || []);
+      }
+    } catch (err) {
+      console.error("Failed to load monitors filter list:", err);
+    }
+  }, []);
 
-  const loadHistory = useCallback(() => {
-    dispatch(
-      fetchHistory({
-        monitorId: selectedMonitor,
-        status: selectedStatus,
-        timeRange,
-        page,
-        limit: 30,
-      })
-    );
-  }, [dispatch, selectedMonitor, selectedStatus, timeRange, page]);
+  useEffect(() => {
+    loadMonitors();
+  }, [loadMonitors]);
+
+  // Direct fetch for history audit logs
+  const loadHistory = useCallback(async () => {
+    setLoading(true);
+    try {
+      const query = new URLSearchParams();
+      if (selectedMonitor) query.append("monitorId", selectedMonitor);
+      if (selectedStatus && selectedStatus !== "ALL") query.append("status", selectedStatus);
+      if (timeRange) query.append("timeRange", timeRange);
+      query.append("page", page.toString());
+      query.append("limit", "30");
+
+      const res = await fetch(`${API_URL}/history?${query.toString()}`, {
+        headers: getHeaders(),
+        credentials: "include",
+      });
+      const data = await res.json();
+      if (data.success) {
+        setHistoryData(data);
+      } else {
+        toast.error(data.error || "Failed to load history");
+      }
+    } catch (err) {
+      toast.error(err.message || "Failed to fetch history logs");
+    } finally {
+      setLoading(false);
+    }
+  }, [selectedMonitor, selectedStatus, timeRange, page]);
 
   useEffect(() => {
     loadHistory();
@@ -63,7 +105,7 @@ export default function HistoryPage() {
           onClick={loadHistory}
           className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-slate-700 dark:text-slate-300 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 hover:bg-slate-50 dark:hover:bg-slate-800 rounded-lg transition-colors cursor-pointer self-start sm:self-auto"
         >
-          <RefreshCw className={`w-3.5 h-3.5 ${loading ? "animate-spin text-blue-600" : ""}`} />
+          <RefreshCw className={`w-3.5 h-3.5 ${loading ? "animate-spin text-[#0E7A88]" : ""}`} />
           <span>Refresh</span>
         </button>
       </div>
@@ -82,7 +124,7 @@ export default function HistoryPage() {
                 setSelectedMonitor(e.target.value);
                 setPage(1);
               }}
-              className="w-full px-3 py-1.5 text-xs bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-slate-900 dark:text-white"
+              className="w-full px-3 py-1.5 text-xs bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#0E7A88] text-slate-900 dark:text-white"
             >
               <option value="">All Services</option>
               {monitors.map((m) => (
@@ -104,7 +146,7 @@ export default function HistoryPage() {
                 setSelectedStatus(e.target.value);
                 setPage(1);
               }}
-              className="w-full px-3 py-1.5 text-xs bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-slate-900 dark:text-white"
+              className="w-full px-3 py-1.5 text-xs bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#0E7A88] text-slate-900 dark:text-white"
             >
               <option value="ALL">All Statuses</option>
               <option value="UP">Success (UP)</option>
@@ -123,7 +165,7 @@ export default function HistoryPage() {
                 setTimeRange(e.target.value);
                 setPage(1);
               }}
-              className="w-full px-3 py-1.5 text-xs bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-slate-900 dark:text-white"
+              className="w-full px-3 py-1.5 text-xs bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#0E7A88] text-slate-900 dark:text-white"
             >
               <option value="24h">Past 24 Hours</option>
               <option value="7d">Past 7 Days</option>

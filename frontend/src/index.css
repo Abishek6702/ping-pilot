@@ -2,12 +2,26 @@
 
 @custom-variant dark (&:where(.dark, .dark *));
 
+@theme {
+  --color-teal-brand: #0E7A88;
+  --color-teal-brand-hover: #0b6672;
+  --color-teal-brand-active: #084d56;
+  --color-teal-brand-light: #f0fbfb;
+  --color-teal-brand-border: #b2e3e8;
+}
+
 @layer base {
   *, ::after, ::before {
     border-color: var(--color-slate-200, #e2e8f0);
   }
   .dark *, .dark ::after, .dark ::before {
     border-color: var(--color-slate-800, #1e293b);
+  }
+
+  :root {
+    --primary: #0E7A88;
+    --primary-hover: #0b6672;
+    --primary-light: #f0fbfb;
   }
 }
 
@@ -35,4 +49,22 @@
 
 .animate-pulse-dot {
   animation: pulse-dot 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+}
+
+/* Primary brand utilities */
+.bg-brand {
+  background-color: #0E7A88;
+}
+.bg-brand:hover {
+  background-color: #0b6672;
+}
+.text-brand {
+  color: #0E7A88;
+}
+.border-brand {
+  border-color: #0E7A88;
+}
+.ring-brand:focus {
+  outline: none;
+  box-shadow: 0 0 0 3px rgba(14, 122, 136, 0.25);
 }

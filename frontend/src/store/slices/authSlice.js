@@ -25,6 +25,21 @@ export const loginWithCredentials = createAsyncThunk(
   }
 );
 
+export const registerUser = createAsyncThunk(
+  "auth/registerUser",
+  async ({ name, email, password }, { rejectWithValue }) => {
+    try {
+      const res = await api.post("/auth/register", { name, email, password });
+      if (res.data.token) {
+        localStorage.setItem("pingpilot_token", res.data.token);
+      }
+      return res.data;
+    } catch (err) {
+      return rejectWithValue(err.response?.data?.error || "Registration failed");
+    }
+  }
+);
+
 export const loginWithGoogle = createAsyncThunk(
   "auth/loginWithGoogle",
   async ({ idToken }, { rejectWithValue }) => {
@@ -65,6 +80,26 @@ const authSlice = createSlice({
     clearAuthError: (state) => {
       state.error = null;
     },
+    setAuthUser: (state, action) => {
+      state.user = action.payload.user || action.payload;
+      if (action.payload.token) {
+        state.token = action.payload.token;
+        localStorage.setItem("pingpilot_token", action.payload.token);
+      }
+      state.isAuthenticated = true;
+      state.isInitialized = true;
+      state.loading = false;
+      state.error = null;
+    },
+    clearAuth: (state) => {
+      state.user = null;
+      state.token = null;
+      state.isAuthenticated = false;
+      state.isInitialized = true;
+      state.loading = false;
+      state.error = null;
+      localStorage.removeItem("pingpilot_token");
+    },
   },
   extraReducers: (builder) => {
     builder
@@ -102,6 +137,23 @@ const authSlice = createSlice({
         state.isAuthenticated = false;
         state.error = action.payload;
       })
+      // registerUser
+      .addCase(registerUser.pending, (state) => {
+        state.loading = true;
+        state.error = null;
+      })
+      .addCase(registerUser.fulfilled, (state, action) => {
+        state.loading = false;
+        state.isAuthenticated = true;
+        state.user = action.payload.user;
+        state.token = action.payload.token;
+        state.error = null;
+      })
+      .addCase(registerUser.rejected, (state, action) => {
+        state.loading = false;
+        state.isAuthenticated = false;
+        state.error = action.payload;
+      })
       // loginWithGoogle
       .addCase(loginWithGoogle.pending, (state) => {
         state.loading = true;
@@ -129,5 +181,5 @@ const authSlice = createSlice({
   },
 });
 
-export const { clearAuthError } = authSlice.actions;
+export const { clearAuthError, setAuthUser, clearAuth } = authSlice.actions;
 export default authSlice.reducer;

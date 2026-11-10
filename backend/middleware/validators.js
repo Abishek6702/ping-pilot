@@ -18,6 +18,20 @@ const validateLogin = [
   checkValidationErrors,
 ];
 
+const validateRegister = [
+  body("name")
+    .trim()
+    .notEmpty()
+    .withMessage("Name is required")
+    .isLength({ max: 60 })
+    .withMessage("Name cannot exceed 60 characters"),
+  body("email").trim().isEmail().withMessage("Please provide a valid email address"),
+  body("password")
+    .isLength({ min: 8 })
+    .withMessage("Password must be at least 8 characters long"),
+  checkValidationErrors,
+];
+
 const validateGoogleAuth = [
   body("idToken").trim().notEmpty().withMessage("Google ID token is required"),
   checkValidationErrors,
@@ -128,6 +142,7 @@ const validateSettingsInput = [
 
 module.exports = {
   validateLogin,
+  validateRegister,
   validateGoogleAuth,
   validateMonitorInput,
   validateMonitorUpdate,

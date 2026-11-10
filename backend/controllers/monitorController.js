@@ -3,6 +3,13 @@ const PingResult = require("../models/PingResult");
 const { validateUrlForMonitoring } = require("../utils/ssrfFilter");
 const { pingMonitor } = require("../services/monitoringEngine");
 
+function isAuthorizedForMonitor(user, monitor) {
+  if (!user) return false;
+  if (user.role === "admin") return true;
+  if (!monitor.userId) return true;
+  return monitor.userId.toString() === user._id.toString();
+}
+
 /**
  * Get all monitors with filtering, search, and pagination
  * GET /api/monitors
@@ -21,6 +28,10 @@ async function getMonitors(req, res, next) {
         { name: { $regex: search, $options: "i" } },
         { url: { $regex: search, $options: "i" } },
       ];
+    }
+
+    if (req.user && req.user.role !== "admin") {
+      query.userId = req.user._id;
     }
 
     const pageNum = Math.max(1, parseInt(page, 10));
@@ -85,6 +96,7 @@ async function createMonitor(req, res, next) {
       isActive: isActive !== false,
       currentStatus: isActive === false ? "PAUSED" : "UNKNOWN",
       failureThreshold: Number(failureThreshold) || 2,
+      userId: req.user?._id || null,
     });
 
     return res.status(201).json({
@@ -111,6 +123,13 @@ async function getMonitorById(req, res, next) {
       });
     }
 
+    if (!isAuthorizedForMonitor(req.user, monitor)) {
+      return res.status(403).json({
+        success: false,
+        error: "You do not have permission to access this monitor",
+      });
+    }
+
     return res.status(200).json({
       success: true,
       monitor,
@@ -131,6 +150,13 @@ async function updateMonitor(req, res, next) {
       return res.status(404).json({
         success: false,
         error: "Monitor not found",
+      });
+    }
+
+    if (!isAuthorizedForMonitor(req.user, monitor)) {
+      return res.status(403).json({
+        success: false,
+        error: "You do not have permission to access this monitor",
       });
     }
 
@@ -199,6 +225,13 @@ async function deleteMonitor(req, res, next) {
       });
     }
 
+    if (!isAuthorizedForMonitor(req.user, monitor)) {
+      return res.status(403).json({
+        success: false,
+        error: "You do not have permission to access this monitor",
+      });
+    }
+
     await Promise.all([
       Monitor.findByIdAndDelete(req.params.id),
       PingResult.deleteMany({ monitorId: req.params.id }),
@@ -224,6 +257,13 @@ async function toggleMonitor(req, res, next) {
       return res.status(404).json({
         success: false,
         error: "Monitor not found",
+      });
+    }
+
+    if (!isAuthorizedForMonitor(req.user, monitor)) {
+      return res.status(403).json({
+        success: false,
+        error: "You do not have permission to access this monitor",
       });
     }
 
@@ -257,6 +297,13 @@ async function pingMonitorNow(req, res, next) {
       return res.status(404).json({
         success: false,
         error: "Monitor not found",
+      });
+    }
+
+    if (!isAuthorizedForMonitor(req.user, monitor)) {
+      return res.status(403).json({
+        success: false,
+        error: "You do not have permission to access this monitor",
       });
     }
 

@@ -20,7 +20,23 @@ async function getHistory(req, res, next) {
 
     const query = {};
 
-    if (monitorId && mongoose.Types.ObjectId.isValid(monitorId)) {
+    if (req.user && req.user.role !== "admin") {
+      const userMonitors = await Monitor.find({ userId: req.user._id }).select("_id");
+      const allowedIds = userMonitors.map((m) => m._id.toString());
+
+      if (monitorId) {
+        if (!allowedIds.includes(monitorId.toString())) {
+          return res.status(200).json({
+            success: true,
+            history: [],
+            pagination: { page: 1, limit: parseInt(limit, 10), total: 0, pages: 1 },
+          });
+        }
+        query.monitorId = monitorId;
+      } else {
+        query.monitorId = { $in: userMonitors.map((m) => m._id) };
+      }
+    } else if (monitorId && mongoose.Types.ObjectId.isValid(monitorId)) {
       query.monitorId = monitorId;
     }
 
@@ -80,6 +96,35 @@ async function getMonitorHistory(req, res, next) {
       return res.status(400).json({ success: false, error: "Invalid monitor ID" });
     }
 
+    const monitor = await Monitor.findById(id);
+    if (!monitor) {
+      return res.status(404).json({ success: false, error: "Monitor not found" });
+    }
+
+    if (
+      req.user &&
+      req.user.role !== "admin" &&
+      monitor.userId &&
+      monitor.userId.toString() !== req.user._id.toString()
+    ) {
+      return res.status(403).json({
+        success: false,
+        error: "You do not have permission to view stats for this monitor",
+      });
+    }
+
+    if (
+      req.user &&
+      req.user.role !== "admin" &&
+      monitor.userId &&
+      monitor.userId.toString() !== req.user._id.toString()
+    ) {
+      return res.status(403).json({
+        success: false,
+        error: "You do not have permission to view history for this monitor",
+      });
+    }
+
     let hours = 24;
     if (timeRange === "7d") hours = 24 * 7;
     if (timeRange === "30d") hours = 24 * 30;
@@ -133,6 +178,18 @@ async function getMonitorStats(req, res, next) {
     const monitor = await Monitor.findById(id);
     if (!monitor) {
       return res.status(404).json({ success: false, error: "Monitor not found" });
+    }
+
+    if (
+      req.user &&
+      req.user.role !== "admin" &&
+      monitor.userId &&
+      monitor.userId.toString() !== req.user._id.toString()
+    ) {
+      return res.status(403).json({
+        success: false,
+        error: "You do not have permission to view stats for this monitor",
+      });
     }
 
     let hours = 24;

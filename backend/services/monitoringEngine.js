@@ -2,6 +2,9 @@ const { performance } = require("perf_hooks");
 const Monitor = require("../models/Monitor");
 const PingResult = require("../models/PingResult");
 const SystemSetting = require("../models/SystemSetting");
+const User = require("../models/User");
+const sendMail = require("../utils/sendMail");
+const renderTemplate = require("../utils/renderTemplate");
 const { validateUrlForMonitoring } = require("./../utils/ssrfFilter");
 
 let isCycleRunning = false;
@@ -136,6 +139,40 @@ async function pingMonitor(monitor, options = {}) {
   monitor.lastResponseTime = responseTime;
 
   await monitor.save();
+
+  // Send status transition email alerts if status changed
+  const statusChanged = previousStatus !== monitor.currentStatus && previousStatus !== "UNKNOWN";
+  if (statusChanged && monitor.userId) {
+    try {
+      const user = await User.findById(monitor.userId);
+      if (user && user.email) {
+        if (monitor.currentStatus === "DOWN") {
+          const html = renderTemplate("serviceDown", {
+            serviceName: monitor.name,
+            url: monitor.url,
+            failureCount: monitor.consecutiveFailures,
+            errorMessage: monitor.lastError,
+            time: new Date().toUTCString(),
+          });
+          sendMail(user.email, `⚠️ Service Alert: ${monitor.name} is DOWN`, html).catch((err) =>
+            console.error("Failed to send DOWN alert email:", err.message)
+          );
+        } else if (monitor.currentStatus === "UP" && previousStatus === "DOWN") {
+          const html = renderTemplate("serviceRecovered", {
+            serviceName: monitor.name,
+            url: monitor.url,
+            responseTime,
+            time: new Date().toUTCString(),
+          });
+          sendMail(user.email, `✅ Service Recovered: ${monitor.name} is Back Online`, html).catch((err) =>
+            console.error("Failed to send recovery alert email:", err.message)
+          );
+        }
+      }
+    } catch (notifyErr) {
+      console.error("Status transition email notification error:", notifyErr.message);
+    }
+  }
 
   return {
     monitorId: monitor._id,

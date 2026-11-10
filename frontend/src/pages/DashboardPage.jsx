@@ -1,13 +1,5 @@
 import React, { useEffect, useState, useCallback } from "react";
-import { useDispatch, useSelector } from "react-redux";
-import {
-  fetchDashboard,
-  pingMonitor,
-  toggleMonitor,
-  deleteMonitor,
-  createMonitor,
-  updateMonitor,
-} from "../store/slices/monitorsSlice";
+import { useSelector } from "react-redux";
 import Card from "../components/common/Card";
 import StatusBadge from "../components/common/StatusBadge";
 import ResponseTimeChart from "../components/charts/ResponseTimeChart";
@@ -29,9 +21,22 @@ import {
 } from "lucide-react";
 import toast from "react-hot-toast";
 
+const API_URL = import.meta.env.VITE_API_URL || "http://localhost:4001/api";
+
+const getHeaders = () => {
+  const token = localStorage.getItem("pingpilot_token");
+  return {
+    "Content-Type": "application/json",
+    ...(token ? { Authorization: `Bearer ${token}` } : {}),
+  };
+};
+
 export default function DashboardPage() {
-  const dispatch = useDispatch();
-  const { dashboardData, loading, pingingId } = useSelector((state) => state.monitors);
+  const { user } = useSelector((state) => state.auth);
+
+  const [dashboardData, setDashboardData] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [pingingId, setPingingId] = useState(null);
 
   const [timeRange, setTimeRange] = useState("24h");
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -39,63 +44,122 @@ export default function DashboardPage() {
   const [deletingMonitor, setDeletingMonitor] = useState(null);
   const [modalLoading, setModalLoading] = useState(false);
 
-  const loadData = useCallback((range = timeRange) => {
-    dispatch(fetchDashboard(range));
-  }, [dispatch, timeRange]);
+  // Direct normal fetch for dashboard metrics inside this file
+  const loadData = useCallback(async (range = timeRange) => {
+    setLoading(true);
+    try {
+      const res = await fetch(`${API_URL}/dashboard?timeRange=${range}`, {
+        headers: getHeaders(),
+        credentials: "include",
+      });
+      const data = await res.json();
+      if (data.success) {
+        setDashboardData(data);
+      } else {
+        toast.error(data.error || "Failed to load dashboard");
+      }
+    } catch (err) {
+      toast.error(err.message || "Failed to fetch dashboard data");
+    } finally {
+      setLoading(false);
+    }
+  }, [timeRange]);
 
   useEffect(() => {
     loadData(timeRange);
   }, [loadData, timeRange]);
 
+  // Direct normal fetch for manual ping
   const handlePing = async (id) => {
+    setPingingId(id);
     try {
-      const res = await dispatch(pingMonitor(id)).unwrap();
-      toast.success(res.message || "Ping completed successfully");
-      loadData();
+      const res = await fetch(`${API_URL}/monitors/${id}/ping`, {
+        method: "POST",
+        headers: getHeaders(),
+        credentials: "include",
+      });
+      const data = await res.json();
+      if (data.success) {
+        toast.success(data.message || "Ping completed successfully");
+        loadData(timeRange);
+      } else {
+        toast.error(data.error || "Ping failed");
+      }
     } catch (err) {
-      toast.error(err || "Ping failed");
+      toast.error(err.message || "Ping request failed");
+    } finally {
+      setPingingId(null);
     }
   };
 
+  // Direct normal fetch for toggle pause/resume
   const handleToggle = async (id) => {
     try {
-      const res = await dispatch(toggleMonitor(id)).unwrap();
-      toast.success(res.isActive ? "Monitor enabled" : "Monitor paused");
-      loadData();
+      const res = await fetch(`${API_URL}/monitors/${id}/toggle`, {
+        method: "PATCH",
+        headers: getHeaders(),
+        credentials: "include",
+      });
+      const data = await res.json();
+      if (data.success) {
+        toast.success(data.message || "Monitor updated");
+        loadData(timeRange);
+      } else {
+        toast.error(data.error || "Failed to toggle monitor");
+      }
     } catch (err) {
-      toast.error(err || "Failed to toggle monitor");
+      toast.error(err.message || "Failed to toggle monitor");
     }
   };
 
+  // Direct normal fetch for delete monitor
   const handleDeleteConfirm = async () => {
     if (!deletingMonitor) return;
     try {
-      await dispatch(deleteMonitor(deletingMonitor._id)).unwrap();
-      toast.success("Monitor deleted successfully");
-      setDeletingMonitor(null);
-      loadData();
+      const res = await fetch(`${API_URL}/monitors/${deletingMonitor._id}`, {
+        method: "DELETE",
+        headers: getHeaders(),
+        credentials: "include",
+      });
+      const data = await res.json();
+      if (data.success) {
+        toast.success("Monitor deleted successfully");
+        setDeletingMonitor(null);
+        loadData(timeRange);
+      } else {
+        toast.error(data.error || "Failed to delete monitor");
+      }
     } catch (err) {
-      toast.error(err || "Failed to delete monitor");
+      toast.error(err.message || "Failed to delete monitor");
     }
   };
 
+  // Direct normal fetch for create / update monitor modal submit
   const handleModalSubmit = async (formData) => {
     setModalLoading(true);
     try {
-      if (editingMonitor) {
-        await dispatch(
-          updateMonitor({ id: editingMonitor._id, data: formData })
-        ).unwrap();
-        toast.success("Monitor updated successfully");
+      const url = editingMonitor
+        ? `${API_URL}/monitors/${editingMonitor._id}`
+        : `${API_URL}/monitors`;
+      const method = editingMonitor ? "PATCH" : "POST";
+
+      const res = await fetch(url, {
+        method,
+        headers: getHeaders(),
+        credentials: "include",
+        body: JSON.stringify(formData),
+      });
+      const data = await res.json();
+      if (data.success) {
+        toast.success(data.message || (editingMonitor ? "Monitor updated" : "Monitor created"));
+        setIsModalOpen(false);
+        setEditingMonitor(null);
+        loadData(timeRange);
       } else {
-        await dispatch(createMonitor(formData)).unwrap();
-        toast.success("Monitor created successfully");
+        toast.error(data.error || "Failed to save monitor");
       }
-      setIsModalOpen(false);
-      setEditingMonitor(null);
-      loadData();
     } catch (err) {
-      toast.error(err || "Failed to save monitor");
+      toast.error(err.message || "Failed to save monitor");
     } finally {
       setModalLoading(false);
     }
@@ -119,11 +183,20 @@ export default function DashboardPage() {
       {/* Top Header Controls */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
-          <h2 className="text-xl font-bold tracking-tight text-slate-900 dark:text-white">
-            System Overview
-          </h2>
+          <div className="flex items-center gap-2">
+            <h2 className="text-xl font-bold tracking-tight text-slate-900 dark:text-white">
+              System Overview
+            </h2>
+            {user?.role === "admin" && metrics.totalUsers !== undefined && (
+              <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-[#0E7A88]/15 text-[#0E7A88]">
+                Admin View • {metrics.totalUsers} Total Users
+              </span>
+            )}
+          </div>
           <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
-            Real-time status of keep-alive probes and endpoint availability.
+            {user?.role === "admin"
+              ? "Global health overview of all endpoints and registered user monitors."
+              : "Real-time status of your monitored endpoints and keep-alive health."}
           </p>
         </div>
 
@@ -137,7 +210,7 @@ export default function DashboardPage() {
                 onClick={() => setTimeRange(range)}
                 className={`px-3 py-1 rounded-md font-medium transition-colors cursor-pointer ${
                   timeRange === range
-                    ? "bg-blue-600 text-white shadow-2xs"
+                    ? "bg-[#0E7A88] text-white shadow-2xs"
                     : "text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white"
                 }`}
               >
@@ -153,7 +226,7 @@ export default function DashboardPage() {
             title="Refresh metrics"
             className="p-2 text-slate-600 dark:text-slate-400 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 hover:bg-slate-50 dark:hover:bg-slate-800 rounded-lg transition-colors cursor-pointer shadow-2xs"
           >
-            <RefreshCw className={`w-4 h-4 ${loading ? "animate-spin text-blue-600" : ""}`} />
+            <RefreshCw className={`w-4 h-4 ${loading ? "animate-spin text-[#0E7A88]" : ""}`} />
           </button>
 
           {/* Add Monitor Button */}
@@ -163,7 +236,7 @@ export default function DashboardPage() {
               setEditingMonitor(null);
               setIsModalOpen(true);
             }}
-            className="flex items-center gap-1.5 px-3.5 py-2 text-xs font-medium text-white bg-blue-600 hover:bg-blue-700 rounded-lg transition-colors shadow-2xs cursor-pointer"
+            className="flex items-center gap-1.5 px-3.5 py-2 text-xs font-medium text-white bg-[#0E7A88] hover:bg-[#0b6672] active:bg-[#084d56] rounded-lg transition-colors shadow-2xs cursor-pointer"
           >
             <Plus className="w-4 h-4" />
             <span>Add Monitor</span>
@@ -189,31 +262,31 @@ export default function DashboardPage() {
             <div className="text-2xl font-bold text-slate-900 dark:text-white">
               {metrics.totalMonitors}
             </div>
-            <span className="text-[11px] text-slate-400 mt-1">Configured endpoints</span>
+            <div className="text-[11px] text-slate-400 mt-1">Configured monitors</div>
           </Card>
 
           {/* Operational */}
           <Card className="p-4 flex flex-col justify-between">
-            <div className="flex items-center justify-between text-emerald-500 mb-2">
+            <div className="flex items-center justify-between text-emerald-600 dark:text-emerald-400 mb-2">
               <span className="text-xs font-medium text-slate-600 dark:text-slate-400">Operational</span>
               <CheckCircle2 className="w-4 h-4" />
             </div>
             <div className="text-2xl font-bold text-emerald-600 dark:text-emerald-400">
               {metrics.operational}
             </div>
-            <span className="text-[11px] text-slate-400 mt-1">Passing checks</span>
+            <div className="text-[11px] text-slate-400 mt-1">Healthy endpoints</div>
           </Card>
 
           {/* Down */}
           <Card className="p-4 flex flex-col justify-between">
-            <div className="flex items-center justify-between text-rose-500 mb-2">
+            <div className="flex items-center justify-between text-rose-600 dark:text-rose-400 mb-2">
               <span className="text-xs font-medium text-slate-600 dark:text-slate-400">Down</span>
               <XCircle className="w-4 h-4" />
             </div>
             <div className="text-2xl font-bold text-rose-600 dark:text-rose-400">
               {metrics.down}
             </div>
-            <span className="text-[11px] text-slate-400 mt-1">Failing endpoints</span>
+            <div className="text-[11px] text-slate-400 mt-1">Failing thresholds</div>
           </Card>
 
           {/* Paused */}
@@ -222,110 +295,72 @@ export default function DashboardPage() {
               <span className="text-xs font-medium text-slate-600 dark:text-slate-400">Paused</span>
               <PauseCircle className="w-4 h-4" />
             </div>
-            <div className="text-2xl font-bold text-amber-600 dark:text-amber-400">
-              {metrics.paused}
-            </div>
-            <span className="text-[11px] text-slate-400 mt-1">Monitoring off</span>
+            <div className="text-2xl font-bold text-amber-500">{metrics.paused}</div>
+            <div className="text-[11px] text-slate-400 mt-1">Inactive checks</div>
           </Card>
 
           {/* Average Response Time */}
           <Card className="p-4 flex flex-col justify-between">
-            <div className="flex items-center justify-between text-blue-500 mb-2">
+            <div className="flex items-center justify-between text-teal-600 dark:text-teal-400 mb-2">
               <span className="text-xs font-medium text-slate-600 dark:text-slate-400">Avg Latency</span>
               <Zap className="w-4 h-4" />
             </div>
-            <div className="text-2xl font-bold text-slate-900 dark:text-white font-mono">
+            <div className="text-2xl font-bold text-slate-900 dark:text-white">
               {metrics.averageResponseTime}
               <span className="text-xs font-normal text-slate-400 ml-1">ms</span>
             </div>
-            <span className="text-[11px] text-slate-400 mt-1">Across probes</span>
+            <div className="text-[11px] text-slate-400 mt-1">Last {timeRange}</div>
           </Card>
 
           {/* Overall Uptime */}
           <Card className="p-4 flex flex-col justify-between">
-            <div className="flex items-center justify-between text-purple-500 mb-2">
+            <div className="flex items-center justify-between text-[#0E7A88] dark:text-[#38b2ac] mb-2">
               <span className="text-xs font-medium text-slate-600 dark:text-slate-400">Uptime</span>
               <TrendingUp className="w-4 h-4" />
             </div>
-            <div
-              className={`text-2xl font-bold ${
-                metrics.overallUptime >= 99
-                  ? "text-emerald-600 dark:text-emerald-400"
-                  : metrics.overallUptime >= 95
-                  ? "text-amber-600 dark:text-amber-400"
-                  : "text-rose-600 dark:text-rose-400"
-              }`}
-            >
+            <div className="text-2xl font-bold text-slate-900 dark:text-white">
               {metrics.overallUptime}%
             </div>
-            <span className="text-[11px] text-slate-400 mt-1">In selected range</span>
+            <div className="text-[11px] text-slate-400 mt-1">Availability ratio</div>
           </Card>
         </div>
       )}
 
       {/* Charts Section */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        {/* Response Time Chart */}
-        <Card className="p-5">
-          <div className="flex items-center justify-between mb-4">
-            <div>
-              <h3 className="text-sm font-semibold text-slate-900 dark:text-white">
-                Response Time Trend
-              </h3>
-              <p className="text-xs text-slate-400">Average HTTP response time in milliseconds</p>
-            </div>
-          </div>
-          <ResponseTimeChart data={charts} height={240} />
-        </Card>
-
-        {/* Uptime History Chart */}
-        <Card className="p-5">
-          <div className="flex items-center justify-between mb-4">
-            <div>
-              <h3 className="text-sm font-semibold text-slate-900 dark:text-white">
-                Uptime Availability
-              </h3>
-              <p className="text-xs text-slate-400">Percentage of successful checks over time</p>
-            </div>
-          </div>
-          <UptimeChart data={charts} height={240} />
-        </Card>
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
+        <ResponseTimeChart data={charts} timeRange={timeRange} />
+        <UptimeChart data={charts} timeRange={timeRange} />
       </div>
 
       {/* Monitors Overview Table */}
       <Card className="overflow-hidden">
-        <div className="px-6 py-4 border-b border-slate-100 dark:border-slate-800 flex items-center justify-between">
+        <div className="p-4 sm:p-5 border-b border-slate-100 dark:border-slate-800 flex items-center justify-between">
           <div>
             <h3 className="text-sm font-semibold text-slate-900 dark:text-white">
-              Monitored Endpoints
+              Monitored Services
             </h3>
             <p className="text-xs text-slate-400 mt-0.5">
-              Live status and keep-alive health for registered services.
+              Current state, latency, and real-time trigger actions.
             </p>
           </div>
-          <span className="text-xs text-slate-400">
-            {monitors.length} {monitors.length === 1 ? "service" : "services"}
+          <span className="text-xs text-slate-400 font-medium">
+            {monitors.length} active service{monitors.length === 1 ? "" : "s"}
           </span>
         </div>
 
         {loading && !dashboardData ? (
-          <TableSkeleton rows={5} cols={6} />
+          <div className="p-4">
+            <TableSkeleton rows={5} cols={6} />
+          </div>
         ) : monitors.length === 0 ? (
           <EmptyState
-            title="No monitors yet"
-            description="Add your backend or Render service URL to begin 5-minute health monitoring."
-            action={
-              <button
-                type="button"
-                onClick={() => {
-                  setEditingMonitor(null);
-                  setIsModalOpen(true);
-                }}
-                className="px-4 py-2 text-xs font-medium text-white bg-blue-600 hover:bg-blue-700 rounded-lg transition-colors cursor-pointer"
-              >
-                Add Your First Monitor
-              </button>
-            }
+            title="No monitors found"
+            description="Get started by registering your first API endpoint to enable keep-alive requests."
+            actionLabel="Add First Monitor"
+            onAction={() => {
+              setEditingMonitor(null);
+              setIsModalOpen(true);
+            }}
           />
         ) : (
           <MonitorTable
@@ -342,39 +377,29 @@ export default function DashboardPage() {
         )}
       </Card>
 
-      {/* Recent Activity Feed */}
+      {/* Recent Activity List */}
       {recentActivity.length > 0 && (
-        <Card className="p-5">
+        <Card className="p-4 sm:p-5">
           <h3 className="text-sm font-semibold text-slate-900 dark:text-white mb-3">
             Recent Ping Activity
           </h3>
-          <div className="divide-y divide-slate-100 dark:divide-slate-800/60">
-            {recentActivity.map((ping) => (
-              <div
-                key={ping._id}
-                className="py-2.5 flex items-center justify-between text-xs hover:bg-slate-50/50 dark:hover:bg-slate-800/20 px-2 rounded-lg transition-colors"
-              >
+          <div className="divide-y divide-slate-100 dark:divide-slate-800 text-xs">
+            {recentActivity.map((p) => (
+              <div key={p._id} className="py-2.5 flex items-center justify-between">
                 <div className="flex items-center gap-3">
-                  <StatusBadge status={ping.status} size="sm" />
-                  <span className="font-medium text-slate-800 dark:text-slate-200">
-                    {ping.monitorId?.name || "Unknown Monitor"}
-                  </span>
-                  {ping.statusCode && (
-                    <span className="text-[11px] font-mono px-1.5 py-0.5 bg-slate-100 dark:bg-slate-800 rounded-md text-slate-600 dark:text-slate-400">
-                      HTTP {ping.statusCode}
+                  <StatusBadge status={p.status} />
+                  <div>
+                    <span className="font-medium text-slate-800 dark:text-slate-200">
+                      {p.monitorId?.name || "Service"}
                     </span>
-                  )}
-                  {ping.errorMessage && (
-                    <span className="text-[11px] text-rose-500 truncate max-w-xs">
-                      {ping.errorMessage}
+                    <span className="text-slate-400 ml-2">
+                      {p.responseTime}ms • HTTP {p.statusCode || "N/A"}
                     </span>
-                  )}
+                  </div>
                 </div>
-
-                <div className="flex items-center gap-4 text-slate-400">
-                  <span className="font-mono">{ping.responseTime}ms</span>
-                  <span>{new Date(ping.checkedAt).toLocaleTimeString()}</span>
-                </div>
+                <span className="text-slate-400">
+                  {new Date(p.checkedAt).toLocaleTimeString()}
+                </span>
               </div>
             ))}
           </div>
@@ -393,15 +418,15 @@ export default function DashboardPage() {
         loading={modalLoading}
       />
 
-      {/* Delete Confirmation Dialog */}
+      {/* Delete Confirmation Modal */}
       <ConfirmDialog
         isOpen={Boolean(deletingMonitor)}
-        onClose={() => setDeletingMonitor(null)}
-        onConfirm={handleDeleteConfirm}
         title="Delete Monitor"
-        message={`Are you sure you want to delete "${deletingMonitor?.name}"? All associated ping history will be permanently deleted.`}
-        confirmText="Delete Monitor"
-        confirmVariant="danger"
+        message={`Are you sure you want to delete "${deletingMonitor?.name}"? All associated historical ping data will be permanently removed.`}
+        confirmLabel="Delete"
+        isDanger={true}
+        onConfirm={handleDeleteConfirm}
+        onCancel={() => setDeletingMonitor(null)}
       />
     </div>
   );

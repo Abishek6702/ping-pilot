@@ -1,5 +1,6 @@
 const Monitor = require("../models/Monitor");
 const PingResult = require("../models/PingResult");
+const User = require("../models/User");
 
 /**
  * Get dashboard overview metrics, summary cards, chart data, and recent activity
@@ -15,18 +16,27 @@ async function getDashboard(req, res, next) {
 
     const sinceDate = new Date(Date.now() - durationHours * 60 * 60 * 1000);
 
-    // 1. Fetch all monitors
-    const monitors = await Monitor.find().sort({ createdAt: -1 });
+    const isAdmin = req.user && req.user.role === "admin";
+    const monitorFilter = isAdmin ? {} : { userId: req.user._id };
+
+    // 1. Fetch relevant monitors
+    const monitors = await Monitor.find(monitorFilter).sort({ createdAt: -1 });
 
     const totalMonitors = monitors.length;
     const operational = monitors.filter((m) => m.isActive && m.currentStatus === "UP").length;
     const down = monitors.filter((m) => m.isActive && m.currentStatus === "DOWN").length;
     const paused = monitors.filter((m) => !m.isActive || m.currentStatus === "PAUSED").length;
 
+    // Filter ping matches
+    const monitorIds = monitors.map((m) => m._id);
+    const pingMatch = isAdmin
+      ? { checkedAt: { $gte: sinceDate } }
+      : { monitorId: { $in: monitorIds }, checkedAt: { $gte: sinceDate } };
+
     // 2. Aggregate stats for the given time range
-    const [pingsSummary, recentActivity, timeSeriesData] = await Promise.all([
+    const [pingsSummary, recentActivity, timeSeriesData, totalUsers] = await Promise.all([
       PingResult.aggregate([
-        { $match: { checkedAt: { $gte: sinceDate } } },
+        { $match: pingMatch },
         {
           $group: {
             _id: null,
@@ -39,14 +49,14 @@ async function getDashboard(req, res, next) {
         },
       ]),
 
-      PingResult.find({ checkedAt: { $gte: sinceDate } })
+      PingResult.find(pingMatch)
         .populate("monitorId", "name url currentStatus")
         .sort({ checkedAt: -1 })
         .limit(10),
 
       // Aggregate data grouped by time interval for charts
       PingResult.aggregate([
-        { $match: { checkedAt: { $gte: sinceDate } } },
+        { $match: pingMatch },
         {
           $group: {
             _id: {
@@ -65,6 +75,8 @@ async function getDashboard(req, res, next) {
         },
         { $sort: { timestamp: 1 } },
       ]),
+
+      isAdmin ? User.countDocuments() : Promise.resolve(null),
     ]);
 
     const totalPings = pingsSummary[0]?.totalPings || 0;
@@ -76,7 +88,7 @@ async function getDashboard(req, res, next) {
 
     // Calculate individual monitor uptime for table
     const monitorPings = await PingResult.aggregate([
-      { $match: { checkedAt: { $gte: sinceDate } } },
+      { $match: pingMatch },
       {
         $group: {
           _id: "$monitorId",
@@ -131,6 +143,7 @@ async function getDashboard(req, res, next) {
         averageResponseTime: avgResponseTime,
         overallUptime,
         totalChecks: totalPings,
+        ...(isAdmin ? { totalUsers } : {}),
       },
       monitors: monitorsWithStats,
       charts,

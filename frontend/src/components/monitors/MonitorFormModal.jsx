@@ -115,7 +115,7 @@ export default function MonitorFormModal({
             onChange={handleChange}
             placeholder="e.g. Backend API Gateway"
             required
-            className="w-full px-3.5 py-2 text-sm bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-slate-900 dark:text-white"
+            className="w-full px-3.5 py-2 text-sm bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#0E7A88] focus:border-[#0E7A88] text-slate-900 dark:text-white"
           />
         </div>
 
@@ -130,7 +130,7 @@ export default function MonitorFormModal({
             onChange={handleChange}
             placeholder="https://my-app.onrender.com/health"
             required
-            className="w-full px-3.5 py-2 text-sm bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-slate-900 dark:text-white"
+            className="w-full px-3.5 py-2 text-sm bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#0E7A88] focus:border-[#0E7A88] text-slate-900 dark:text-white"
           />
           <p className="mt-1 text-[11px] text-slate-400">
             Must be a public HTTP/HTTPS endpoint. Private IPs and localhost are protected against SSRF.
@@ -147,7 +147,7 @@ export default function MonitorFormModal({
             value={formData.description}
             onChange={handleChange}
             placeholder="e.g. Production user service keep-alive"
-            className="w-full px-3.5 py-2 text-sm bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-slate-900 dark:text-white"
+            className="w-full px-3.5 py-2 text-sm bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#0E7A88] focus:border-[#0E7A88] text-slate-900 dark:text-white"
           />
         </div>
 
@@ -163,7 +163,7 @@ export default function MonitorFormModal({
               onChange={handleChange}
               min="1"
               max="60"
-              className="w-full px-3.5 py-2 text-sm bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-slate-900 dark:text-white"
+              className="w-full px-3.5 py-2 text-sm bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#0E7A88] focus:border-[#0E7A88] text-slate-900 dark:text-white"
             />
           </div>
 
@@ -177,7 +177,7 @@ export default function MonitorFormModal({
               value={formData.expectedStatusCodes}
               onChange={handleChange}
               placeholder="200, 201, 204"
-              className="w-full px-3.5 py-2 text-sm bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-slate-900 dark:text-white"
+              className="w-full px-3.5 py-2 text-sm bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#0E7A88] focus:border-[#0E7A88] text-slate-900 dark:text-white"
             />
           </div>
         </div>
@@ -189,7 +189,7 @@ export default function MonitorFormModal({
             name="isActive"
             checked={formData.isActive}
             onChange={handleChange}
-            className="w-4 h-4 text-blue-600 rounded-sm border-slate-300 dark:border-slate-700 focus:ring-blue-500"
+            className="w-4 h-4 text-[#0E7A88] rounded-sm border-slate-300 dark:border-slate-700 focus:ring-[#0E7A88]"
           />
           <label htmlFor="isActiveToggle" className="text-xs font-medium text-slate-700 dark:text-slate-300 cursor-pointer">
             Monitoring active (uncheck to pause checks)
@@ -208,7 +208,7 @@ export default function MonitorFormModal({
           <button
             type="submit"
             disabled={loading}
-            className="px-4 py-2 text-xs font-medium text-white bg-blue-600 hover:bg-blue-700 disabled:opacity-50 rounded-lg transition-colors flex items-center gap-2 cursor-pointer shadow-xs"
+            className="px-4 py-2 text-xs font-medium text-white bg-[#0E7A88] hover:bg-[#0b6672] active:bg-[#084d56] disabled:opacity-50 rounded-lg transition-colors flex items-center gap-2 cursor-pointer shadow-xs"
           >
             {loading && (
               <span className="w-3.5 h-3.5 border-2 border-white/30 border-t-white rounded-full animate-spin" />

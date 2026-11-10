@@ -52,7 +52,7 @@ export default function MonitorTable({
                   <div className="flex flex-col">
                     <Link
                       to={`/monitors/${m._id}`}
-                      className="font-medium text-slate-900 dark:text-white hover:text-blue-600 dark:hover:text-blue-400 flex items-center gap-1.5 transition-colors"
+                      className="font-medium text-slate-900 dark:text-white hover:text-[#0E7A88] dark:hover:text-[#38b2ac] flex items-center gap-1.5 transition-colors"
                     >
                       {m.name}
                       <ArrowUpRight className="w-3.5 h-3.5 text-slate-400" />
@@ -115,10 +115,10 @@ export default function MonitorTable({
                       onClick={() => onPing(m._id)}
                       disabled={isPinging}
                       title="Ping Now"
-                      className="p-1.5 text-slate-500 hover:text-blue-600 dark:text-slate-400 dark:hover:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-950/50 rounded-md transition-colors cursor-pointer"
+                      className="p-1.5 text-slate-500 hover:text-[#0E7A88] dark:text-slate-400 dark:hover:text-[#38b2ac] hover:bg-[#e8f7f8] dark:hover:bg-[#0E7A88]/20 rounded-md transition-colors cursor-pointer"
                     >
                       <RefreshCw
-                        className={`w-3.5 h-3.5 ${isPinging ? "animate-spin text-blue-600" : ""}`}
+                        className={`w-3.5 h-3.5 ${isPinging ? "animate-spin text-[#0E7A88]" : ""}`}
                       />
                     </button>
 

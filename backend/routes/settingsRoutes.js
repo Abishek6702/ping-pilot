@@ -5,7 +5,7 @@ const { validateSettingsInput } = require("../middleware/validators");
 
 const router = express.Router();
 
-router.use(protect, adminOnly);
+router.use(protect);
 
 router.route("/")
   .get(getSettings)

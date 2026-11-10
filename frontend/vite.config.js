@@ -19,7 +19,7 @@ export default defineConfig(({ mode }) => {
   return {
     plugins: [tailwindcss(), react()],
     server: {
-      port: 4000,
+      port: 3000,
       host: true,
     },
     define: {

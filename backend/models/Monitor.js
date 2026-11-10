@@ -46,6 +46,12 @@ const monitorSchema = new mongoose.Schema(
         message: "Expected status codes must be an array of valid HTTP status codes (100-599)",
       },
     },
+    userId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "User",
+      index: true,
+      default: null,
+    },
     isActive: {
       type: Boolean,
       default: true,

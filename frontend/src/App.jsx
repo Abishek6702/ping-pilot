@@ -3,14 +3,48 @@ import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import { useDispatch, useSelector } from "react-redux";
 import { checkAuth } from "./store/slices/authSlice";
 import Layout from "./components/layout/Layout";
+import LandingPage from "./pages/LandingPage";
 import LoginPage from "./pages/LoginPage";
 import DashboardPage from "./pages/DashboardPage";
 import MonitorsPage from "./pages/MonitorsPage";
 import MonitorDetailsPage from "./pages/MonitorDetailsPage";
 import HistoryPage from "./pages/HistoryPage";
 import SettingsPage from "./pages/SettingsPage";
+import AdminUsersPage from "./pages/AdminUsersPage";
 import NotFoundPage from "./pages/NotFoundPage";
 import { Toaster } from "react-hot-toast";
+
+function RootRoute() {
+  const dispatch = useDispatch();
+  const { isAuthenticated, isInitialized, loading } = useSelector((state) => state.auth);
+
+  useEffect(() => {
+    if (!isInitialized) {
+      dispatch(checkAuth());
+    }
+  }, [dispatch, isInitialized]);
+
+  if (!isInitialized && loading) {
+    return (
+      <div className="min-h-screen bg-slate-50 dark:bg-slate-950 flex items-center justify-center">
+        <div className="flex flex-col items-center gap-3">
+          <div className="w-8 h-8 border-3 border-[#0E7A88]/30 border-t-[#0E7A88] rounded-full animate-spin" />
+          <p className="text-xs text-slate-500 font-medium">Initializing PingPilot...</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (isInitialized && !isAuthenticated) {
+    return <LandingPage />;
+  }
+
+  return (
+    <Layout>
+      <DashboardPage />
+    </Layout>
+  );
+}
 
 function ProtectedRoute({ children }) {
   const dispatch = useDispatch();
@@ -26,7 +60,7 @@ function ProtectedRoute({ children }) {
     return (
       <div className="min-h-screen bg-slate-50 dark:bg-slate-950 flex items-center justify-center">
         <div className="flex flex-col items-center gap-3">
-          <div className="w-8 h-8 border-3 border-blue-600/30 border-t-blue-600 rounded-full animate-spin" />
+          <div className="w-8 h-8 border-3 border-[#0E7A88]/30 border-t-[#0E7A88] rounded-full animate-spin" />
           <p className="text-xs text-slate-500 font-medium">Initializing PingPilot...</p>
         </div>
       </div>
@@ -37,6 +71,14 @@ function ProtectedRoute({ children }) {
     return <Navigate to="/login" replace />;
   }
 
+  return children;
+}
+
+function AdminRoute({ children }) {
+  const { user } = useSelector((state) => state.auth);
+  if (!user || user.role !== "admin") {
+    return <Navigate to="/" replace />;
+  }
   return children;
 }
 
@@ -58,21 +100,32 @@ export default function App() {
         }}
       />
       <Routes>
+        {/* Root Route: Shows LandingPage when unauthenticated, DashboardPage when authenticated */}
+        <Route path="/" element={<RootRoute />} />
+
+        {/* Login Page with blurred dashboard backdrop and centered modal */}
         <Route path="/login" element={<LoginPage />} />
 
+        {/* Authenticated Application Routes */}
         <Route
-          path="/"
           element={
             <ProtectedRoute>
               <Layout />
             </ProtectedRoute>
           }
         >
-          <Route index element={<DashboardPage />} />
-          <Route path="monitors" element={<MonitorsPage />} />
-          <Route path="monitors/:id" element={<MonitorDetailsPage />} />
-          <Route path="history" element={<HistoryPage />} />
-          <Route path="settings" element={<SettingsPage />} />
+          <Route path="/monitors" element={<MonitorsPage />} />
+          <Route path="/monitors/:id" element={<MonitorDetailsPage />} />
+          <Route path="/history" element={<HistoryPage />} />
+          <Route path="/settings" element={<SettingsPage />} />
+          <Route
+            path="/admin/users"
+            element={
+              <AdminRoute>
+                <AdminUsersPage />
+              </AdminRoute>
+            }
+          />
         </Route>
 
         <Route path="*" element={<NotFoundPage />} />

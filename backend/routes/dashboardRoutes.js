@@ -4,7 +4,7 @@ const { protect, adminOnly } = require("../middleware/auth");
 
 const router = express.Router();
 
-router.use(protect, adminOnly);
+router.use(protect);
 router.get("/", getDashboard);
 
 module.exports = router;

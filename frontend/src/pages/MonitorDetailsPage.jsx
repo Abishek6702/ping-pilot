@@ -1,14 +1,5 @@
 import React, { useEffect, useState, useCallback } from "react";
 import { useParams, useNavigate, Link } from "react-router-dom";
-import { useDispatch, useSelector } from "react-redux";
-import {
-  fetchMonitorDetails,
-  fetchMonitorStats,
-  pingMonitor,
-  toggleMonitor,
-  deleteMonitor,
-  updateMonitor,
-} from "../store/slices/monitorsSlice";
 import Card from "../components/common/Card";
 import StatusBadge from "../components/common/StatusBadge";
 import ResponseTimeChart from "../components/charts/ResponseTimeChart";
@@ -28,70 +19,152 @@ import {
 } from "lucide-react";
 import toast from "react-hot-toast";
 
+const API_URL = import.meta.env.VITE_API_URL || "http://localhost:4001/api";
+
+const getHeaders = () => {
+  const token = localStorage.getItem("pingpilot_token");
+  return {
+    "Content-Type": "application/json",
+    ...(token ? { Authorization: `Bearer ${token}` } : {}),
+  };
+};
+
 export default function MonitorDetailsPage() {
   const { id } = useParams();
   const navigate = useNavigate();
-  const dispatch = useDispatch();
 
-  const { currentMonitor, monitorStats, loading, pingingId } = useSelector(
-    (state) => state.monitors
-  );
+  const [currentMonitor, setCurrentMonitor] = useState(null);
+  const [monitorStats, setMonitorStats] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [isPinging, setIsPinging] = useState(false);
 
   const [timeRange, setTimeRange] = useState("24h");
   const [isEditOpen, setIsEditOpen] = useState(false);
   const [isDeleteOpen, setIsDeleteOpen] = useState(false);
   const [modalLoading, setModalLoading] = useState(false);
 
-  const loadData = useCallback(() => {
-    if (id) {
-      dispatch(fetchMonitorDetails(id));
-      dispatch(fetchMonitorStats({ id, timeRange }));
+  // Direct fetch inside MonitorDetailsPage
+  const loadData = useCallback(async () => {
+    if (!id) return;
+    setLoading(true);
+    try {
+      const [monitorRes, statsRes] = await Promise.all([
+        fetch(`${API_URL}/monitors/${id}`, {
+          headers: getHeaders(),
+          credentials: "include",
+        }),
+        fetch(`${API_URL}/monitors/${id}/stats?timeRange=${timeRange}`, {
+          headers: getHeaders(),
+          credentials: "include",
+        }),
+      ]);
+
+      const monitorData = await monitorRes.json();
+      const statsData = await statsRes.json();
+
+      if (monitorData.success) {
+        setCurrentMonitor(monitorData.monitor);
+      } else {
+        toast.error(monitorData.error || "Failed to load monitor details");
+      }
+
+      if (statsData.success) {
+        setMonitorStats(statsData);
+      }
+    } catch (err) {
+      toast.error(err.message || "Failed to load monitor");
+    } finally {
+      setLoading(false);
     }
-  }, [dispatch, id, timeRange]);
+  }, [id, timeRange]);
 
   useEffect(() => {
     loadData();
   }, [loadData]);
 
+  // Direct fetch for pinging
   const handlePing = async () => {
+    setIsPinging(true);
     try {
-      const res = await dispatch(pingMonitor(id)).unwrap();
-      toast.success(res.message || "Ping completed successfully");
-      loadData();
+      const res = await fetch(`${API_URL}/monitors/${id}/ping`, {
+        method: "POST",
+        headers: getHeaders(),
+        credentials: "include",
+      });
+      const data = await res.json();
+      if (data.success) {
+        toast.success(data.message || "Ping completed successfully");
+        loadData();
+      } else {
+        toast.error(data.error || "Ping failed");
+      }
     } catch (err) {
-      toast.error(err || "Ping failed");
+      toast.error(err.message || "Ping failed");
+    } finally {
+      setIsPinging(false);
     }
   };
 
+  // Direct fetch for pausing / resuming
   const handleToggle = async () => {
     try {
-      const res = await dispatch(toggleMonitor(id)).unwrap();
-      toast.success(res.isActive ? "Monitor enabled" : "Monitor paused");
-      loadData();
+      const res = await fetch(`${API_URL}/monitors/${id}/toggle`, {
+        method: "PATCH",
+        headers: getHeaders(),
+        credentials: "include",
+      });
+      const data = await res.json();
+      if (data.success) {
+        toast.success(data.monitor?.isActive ? "Monitor enabled" : "Monitor paused");
+        loadData();
+      } else {
+        toast.error(data.error || "Failed to toggle monitor");
+      }
     } catch (err) {
-      toast.error(err || "Failed to toggle monitor");
+      toast.error(err.message || "Failed to toggle monitor");
     }
   };
 
+  // Direct fetch for deleting
   const handleDelete = async () => {
     try {
-      await dispatch(deleteMonitor(id)).unwrap();
-      toast.success("Monitor deleted successfully");
-      navigate("/monitors");
+      const res = await fetch(`${API_URL}/monitors/${id}`, {
+        method: "DELETE",
+        headers: getHeaders(),
+        credentials: "include",
+      });
+      const data = await res.json();
+      if (data.success) {
+        toast.success("Monitor deleted successfully");
+        navigate("/monitors");
+      } else {
+        toast.error(data.error || "Failed to delete monitor");
+      }
     } catch (err) {
-      toast.error(err || "Failed to delete monitor");
+      toast.error(err.message || "Failed to delete monitor");
     }
   };
 
+  // Direct fetch for updating monitor
   const handleEditSubmit = async (formData) => {
     setModalLoading(true);
     try {
-      await dispatch(updateMonitor({ id, data: formData })).unwrap();
-      toast.success("Monitor updated successfully");
-      setIsEditOpen(false);
-      loadData();
+      const res = await fetch(`${API_URL}/monitors/${id}`, {
+        method: "PUT",
+        headers: getHeaders(),
+        body: JSON.stringify(formData),
+        credentials: "include",
+      });
+      const data = await res.json();
+      if (data.success) {
+        toast.success("Monitor updated successfully");
+        setIsEditOpen(false);
+        loadData();
+      } else {
+        toast.error(data.error || "Failed to update monitor");
+      }
     } catch (err) {
-      toast.error(err || "Failed to update monitor");
+      toast.error(err.message || "Failed to update monitor");
     } finally {
       setModalLoading(false);
     }
@@ -118,7 +191,7 @@ export default function MonitorDetailsPage() {
         </h3>
         <Link
           to="/monitors"
-          className="mt-4 inline-flex items-center gap-1.5 text-xs text-blue-600 dark:text-blue-400 hover:underline"
+          className="mt-4 inline-flex items-center gap-1.5 text-xs text-[#0E7A88] dark:text-[#38b2ac] hover:underline"
         >
           <ArrowLeft className="w-3.5 h-3.5" /> Back to Monitors
         </Link>
@@ -137,7 +210,6 @@ export default function MonitorDetailsPage() {
 
   const chartData = monitorStats?.chartData || [];
   const recentPings = monitorStats?.recentPings || [];
-  const isPinging = pingingId === id;
 
   return (
     <div className="space-y-6">
@@ -159,7 +231,7 @@ export default function MonitorDetailsPage() {
               onClick={() => setTimeRange(range)}
               className={`px-3 py-1 rounded-md font-medium transition-colors cursor-pointer ${
                 timeRange === range
-                  ? "bg-blue-600 text-white shadow-2xs"
+                  ? "bg-[#0E7A88] text-white shadow-2xs"
                   : "text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white"
               }`}
             >
@@ -185,7 +257,7 @@ export default function MonitorDetailsPage() {
                 href={currentMonitor.url}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="hover:text-blue-600 dark:hover:text-blue-400 flex items-center gap-1 truncate max-w-md font-mono"
+                className="hover:text-[#0E7A88] dark:hover:text-[#38b2ac] flex items-center gap-1 truncate max-w-md font-mono"
               >
                 {currentMonitor.url}
                 <ExternalLink className="w-3 h-3 shrink-0" />
@@ -214,10 +286,10 @@ export default function MonitorDetailsPage() {
               type="button"
               onClick={handlePing}
               disabled={isPinging}
-              className="flex items-center gap-1.5 px-3 py-2 text-xs font-medium text-slate-700 dark:text-slate-200 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 rounded-lg transition-colors cursor-pointer"
+              className="flex items-center gap-1.5 px-3 py-2 text-xs font-medium text-slate-700 dark:text-slate-200 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 rounded-lg transition-colors cursor-pointer disabled:opacity-50"
             >
               <RefreshCw
-                className={`w-3.5 h-3.5 ${isPinging ? "animate-spin text-blue-600" : ""}`}
+                className={`w-3.5 h-3.5 ${isPinging ? "animate-spin text-[#0E7A88]" : ""}`}
               />
               <span>{isPinging ? "Pinging..." : "Ping Now"}</span>
             </button>

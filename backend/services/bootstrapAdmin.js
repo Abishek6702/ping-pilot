@@ -9,40 +9,61 @@ const DEFAULT_SETTINGS = {
   failureThreshold: 2,
 };
 
+function getAdminEmails() {
+  const configured = [
+    process.env.ADMIN_EMAIL,
+    process.env.EMAIL,
+    "abishekkrishnat@gmail.com",
+    "abishek.k@sece.ac.in",
+  ];
+  return Array.from(
+    new Set(
+      configured
+        .filter((e) => e && typeof e === "string" && e.includes("@"))
+        .map((e) => e.toLowerCase().trim())
+    )
+  );
+}
+
 async function bootstrapAdmin() {
   try {
-    const adminEmail = (
-      process.env.ADMIN_EMAIL ||
-      process.env.EMAIL ||
-      "admin@pingpilot.local"
-    )
-      .toLowerCase()
-      .trim();
+    const adminEmails = getAdminEmails();
+    const configuredPassword = process.env.ADMIN_INITIAL_PASSWORD || "Pingpilot";
 
-    const existingAdmin = await User.findOne({ email: adminEmail }).select("+password");
+    for (const email of adminEmails) {
+      const existing = await User.findOne({ email }).select("+password");
 
-    const configuredPassword =
-      process.env.ADMIN_INITIAL_PASSWORD || "Pingpilot";
+      if (!existing) {
+        const adminUser = new User({
+          name: email.split("@")[0] || "Admin",
+          email,
+          password: configuredPassword,
+          role: "admin",
+          authProviders: ["local"],
+          isActive: true,
+        });
 
-    if (!existingAdmin) {
-      const adminUser = new User({
-        name: "Admin",
-        email: adminEmail,
-        password: configuredPassword,
-        role: "admin",
-        authProviders: ["local"],
-        isActive: true,
-      });
-
-      await adminUser.save();
-      console.log(`🚀 Admin account bootstrapped successfully for: ${adminEmail}`);
-    } else {
-      // If configured password differs from existing, synchronize it
-      const matches = await existingAdmin.comparePassword(configuredPassword);
-      if (!matches) {
-        existingAdmin.password = configuredPassword;
-        await existingAdmin.save();
-        console.log(`🔐 Admin password synchronized from ADMIN_INITIAL_PASSWORD for: ${adminEmail}`);
+        await adminUser.save();
+        console.log(`🚀 Admin account bootstrapped successfully for: ${email}`);
+      } else {
+        let changed = false;
+        if (existing.role !== "admin") {
+          existing.role = "admin";
+          changed = true;
+        }
+        if (!existing.isActive) {
+          existing.isActive = true;
+          changed = true;
+        }
+        const matches = await existing.comparePassword(configuredPassword);
+        if (!matches && existing.authProviders.includes("local")) {
+          existing.password = configuredPassword;
+          changed = true;
+          console.log(`🔐 Admin password synchronized from ADMIN_INITIAL_PASSWORD for: ${email}`);
+        }
+        if (changed) {
+          await existing.save();
+        }
       }
     }
 
@@ -53,12 +74,12 @@ async function bootstrapAdmin() {
         await SystemSetting.create({ key, value });
       }
     }
-  } catch (err) {
-    console.error("Failed to bootstrap admin account:", err.message);
+  } catch (error) {
+    console.error("Failed to bootstrap admin account:", error.message || error);
   }
 }
 
 module.exports = {
   bootstrapAdmin,
-  DEFAULT_SETTINGS,
+  getAdminEmails,
 };
