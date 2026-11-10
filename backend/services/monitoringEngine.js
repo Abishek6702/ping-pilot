@@ -211,13 +211,25 @@ async function executeMonitoringCycle() {
     // 2. Fetch all enabled monitors
     const activeMonitors = await Monitor.find({ isActive: true });
 
-    if (activeMonitors.length === 0) {
+    // Filter monitors that are due based on their configured interval (prevents duplicate pings across multiple instances/restarts)
+    const now = Date.now();
+    const monitorsToPing = activeMonitors.filter((monitor) => {
+      if (options.force) return true;
+      if (!monitor.lastCheckedAt) return true;
+      const intervalMs = (monitor.interval || 5) * 60 * 1000;
+      // Allow 45s buffer for clock/cron jitter, but block near-duplicate pings
+      return now - new Date(monitor.lastCheckedAt).getTime() >= intervalMs - 45000;
+    });
+
+    if (monitorsToPing.length === 0) {
       return {
         status: "completed",
-        totalMonitors: 0,
+        totalMonitors: activeMonitors.length,
         checked: 0,
+        skipped: activeMonitors.length,
         up: 0,
         down: 0,
+        reason: "All active monitors were checked recently and are not due yet",
         durationMs: Math.round(performance.now() - cycleStart),
         timestamp: new Date().toISOString(),
       };
@@ -226,8 +238,8 @@ async function executeMonitoringCycle() {
     // 3. Execute checks with a concurrency batch limit (max 5 parallel requests)
     const results = [];
     const concurrency = 5;
-    for (let i = 0; i < activeMonitors.length; i += concurrency) {
-      const batch = activeMonitors.slice(i, i + concurrency);
+    for (let i = 0; i < monitorsToPing.length; i += concurrency) {
+      const batch = monitorsToPing.slice(i, i + concurrency);
       const batchResults = await Promise.all(
         batch.map((m) =>
           pingMonitor(m, { retentionDays }).catch((err) => ({
