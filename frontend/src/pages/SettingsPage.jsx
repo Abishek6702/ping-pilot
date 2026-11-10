@@ -3,7 +3,7 @@ import { useDispatch, useSelector } from "react-redux";
 import { useNavigate } from "react-router-dom";
 import Card from "../components/common/Card";
 import { setTheme } from "../store/slices/themeSlice";
-import { logoutUser } from "../store/slices/authSlice";
+import { clearAuth } from "../store/slices/authSlice";
 import {
   Settings,
   Sun,
@@ -162,12 +162,19 @@ export default function SettingsPage() {
     }
   };
 
+  // Direct fetch call inside SettingsPage for logout
   const handleLogout = async () => {
     try {
-      await dispatch(logoutUser()).unwrap();
-      toast.success("Signed out successfully");
-      navigate("/login");
+      await fetch(`${API_URL}/auth/logout`, {
+        method: "POST",
+        headers: getHeaders(),
+        credentials: "include",
+      });
     } catch (_e) {
+      // ignore
+    } finally {
+      dispatch(clearAuth());
+      toast.success("Signed out successfully");
       navigate("/login");
     }
   };

@@ -1,7 +1,7 @@
 import React, { useEffect } from "react";
 import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import { useDispatch, useSelector } from "react-redux";
-import { checkAuth } from "./store/slices/authSlice";
+import { setAuthUser, clearAuth } from "./store/slices/authSlice";
 import Layout from "./components/layout/Layout";
 import LandingPage from "./pages/LandingPage";
 import LoginPage from "./pages/LoginPage";
@@ -14,28 +14,35 @@ import AdminUsersPage from "./pages/AdminUsersPage";
 import NotFoundPage from "./pages/NotFoundPage";
 import { Toaster } from "react-hot-toast";
 
-function RootRoute() {
-  const dispatch = useDispatch();
-  const { isAuthenticated, isInitialized, loading } = useSelector((state) => state.auth);
+const API_URL = import.meta.env.VITE_API_URL || "http://localhost:4001/api";
 
-  useEffect(() => {
-    if (!isInitialized) {
-      dispatch(checkAuth());
-    }
-  }, [dispatch, isInitialized]);
+const getHeaders = () => {
+  const token = localStorage.getItem("pingpilot_token");
+  return {
+    "Content-Type": "application/json",
+    ...(token ? { Authorization: `Bearer ${token}` } : {}),
+  };
+};
 
-  if (!isInitialized && loading) {
-    return (
-      <div className="min-h-screen bg-slate-50 dark:bg-slate-950 flex items-center justify-center">
-        <div className="flex flex-col items-center gap-3">
-          <div className="w-8 h-8 border-3 border-[#0E7A88]/30 border-t-[#0E7A88] rounded-full animate-spin" />
-          <p className="text-xs text-slate-500 font-medium">Initializing PingPilot...</p>
-        </div>
+function AuthLoadingScreen() {
+  return (
+    <div className="min-h-screen bg-slate-50 dark:bg-slate-950 flex items-center justify-center">
+      <div className="flex flex-col items-center gap-3">
+        <div className="w-8 h-8 border-3 border-[#0E7A88]/30 border-t-[#0E7A88] rounded-full animate-spin" />
+        <p className="text-xs text-slate-500 font-medium">Initializing PingPilot...</p>
       </div>
-    );
+    </div>
+  );
+}
+
+function RootRoute() {
+  const { isAuthenticated, isInitialized } = useSelector((state) => state.auth);
+
+  if (!isInitialized) {
+    return <AuthLoadingScreen />;
   }
 
-  if (isInitialized && !isAuthenticated) {
+  if (!isAuthenticated) {
     return <LandingPage />;
   }
 
@@ -47,27 +54,13 @@ function RootRoute() {
 }
 
 function ProtectedRoute({ children }) {
-  const dispatch = useDispatch();
-  const { isAuthenticated, isInitialized, loading } = useSelector((state) => state.auth);
+  const { isAuthenticated, isInitialized } = useSelector((state) => state.auth);
 
-  useEffect(() => {
-    if (!isInitialized) {
-      dispatch(checkAuth());
-    }
-  }, [dispatch, isInitialized]);
-
-  if (!isInitialized && loading) {
-    return (
-      <div className="min-h-screen bg-slate-50 dark:bg-slate-950 flex items-center justify-center">
-        <div className="flex flex-col items-center gap-3">
-          <div className="w-8 h-8 border-3 border-[#0E7A88]/30 border-t-[#0E7A88] rounded-full animate-spin" />
-          <p className="text-xs text-slate-500 font-medium">Initializing PingPilot...</p>
-        </div>
-      </div>
-    );
+  if (!isInitialized) {
+    return <AuthLoadingScreen />;
   }
 
-  if (isInitialized && !isAuthenticated) {
+  if (!isAuthenticated) {
     return <Navigate to="/login" replace />;
   }
 
@@ -83,7 +76,34 @@ function AdminRoute({ children }) {
 }
 
 export default function App() {
+  const dispatch = useDispatch();
   const theme = useSelector((state) => state.theme.mode);
+  const { isInitialized } = useSelector((state) => state.auth);
+
+  // Direct fetch call inside App.jsx to verify session upon startup
+  useEffect(() => {
+    const verifyUserSession = async () => {
+      try {
+        const token = localStorage.getItem("pingpilot_token");
+        const res = await fetch(`${API_URL}/auth/me`, {
+          headers: getHeaders(),
+          credentials: "include",
+        });
+        const data = await res.json();
+        if (data.success && data.user) {
+          dispatch(setAuthUser({ user: data.user, token }));
+        } else {
+          dispatch(clearAuth());
+        }
+      } catch (_err) {
+        dispatch(clearAuth());
+      }
+    };
+
+    if (!isInitialized) {
+      verifyUserSession();
+    }
+  }, [dispatch, isInitialized]);
 
   return (
     <BrowserRouter>

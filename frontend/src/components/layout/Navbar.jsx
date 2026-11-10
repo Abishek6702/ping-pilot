@@ -17,8 +17,18 @@ import {
   X,
 } from "lucide-react";
 import { toggleTheme } from "../../store/slices/themeSlice";
-import { logoutUser } from "../../store/slices/authSlice";
+import { clearAuth } from "../../store/slices/authSlice";
 import toast from "react-hot-toast";
+
+const API_URL = import.meta.env.VITE_API_URL || "http://localhost:4001/api";
+
+const getHeaders = () => {
+  const token = localStorage.getItem("pingpilot_token");
+  return {
+    "Content-Type": "application/json",
+    ...(token ? { Authorization: `Bearer ${token}` } : {}),
+  };
+};
 
 export default function Navbar({ onOpenSidebar, pageTitle = "Dashboard", isAdmin = false }) {
   const dispatch = useDispatch();
@@ -48,12 +58,19 @@ export default function Navbar({ onOpenSidebar, pageTitle = "Dashboard", isAdmin
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, []);
 
+  // Direct fetch call inside Navbar for logout
   const handleLogout = async () => {
     try {
-      await dispatch(logoutUser()).unwrap();
-      toast.success("Logged out successfully");
-      navigate("/login");
+      await fetch(`${API_URL}/auth/logout`, {
+        method: "POST",
+        headers: getHeaders(),
+        credentials: "include",
+      });
     } catch (_e) {
+      // ignore
+    } finally {
+      dispatch(clearAuth());
+      toast.success("Logged out successfully");
       navigate("/login");
     }
   };
