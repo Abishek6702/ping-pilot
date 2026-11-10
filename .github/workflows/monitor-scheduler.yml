@@ -1,0 +1,73 @@
+name: PingPilot Monitor Scheduler
+
+on:
+  schedule:
+    # Executes every 5 minutes (offset at 2 minutes past the hour)
+    - cron: "2-59/5 * * * *"
+  workflow_dispatch:
+    inputs:
+      reason:
+        description: "Reason for manual run"
+        required: false
+        default: "Manual trigger"
+
+# Prevent overlapping scheduler runs
+concurrency:
+  group: pingpilot-monitoring-scheduler
+  cancel-in-progress: false
+
+jobs:
+  ping-cycle:
+    name: Execute Monitoring Cycle
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Trigger PingPilot Worker Endpoint
+        run: |
+          echo "Starting PingPilot monitoring cycle at $(date -u)..."
+          
+          if [ -z "${{ secrets.PINGPILOT_WORKER_URL }}" ]; then
+            echo "::error::Secret PINGPILOT_WORKER_URL is missing!"
+            exit 1
+          fi
+
+          if [ -z "${{ secrets.PINGPILOT_WORKER_SECRET }}" ]; then
+            echo "::error::Secret PINGPILOT_WORKER_SECRET is missing!"
+            exit 1
+          fi
+
+          # Strip trailing slash from URL if present
+          BASE_URL="${{ secrets.PINGPILOT_WORKER_URL }}"
+          TARGET_URL="${BASE_URL%/}/api/internal/monitor/run"
+
+          echo "Calling worker endpoint: ${TARGET_URL}"
+
+          # Execute curl with timeout and retries
+          HTTP_RESPONSE=$(curl -s -S -X POST "${TARGET_URL}" \
+            -H "Content-Type: application/json" \
+            -H "x-worker-secret: ${{ secrets.PINGPILOT_WORKER_SECRET }}" \
+            --connect-timeout 15 \
+            --max-time 45 \
+            --retry 2 \
+            --retry-delay 5 \
+            --retry-all-errors \
+            --write-out "\nHTTP_STATUS:%{http_code}")
+
+          HTTP_BODY=$(echo "$HTTP_RESPONSE" | sed -e 's/HTTP_STATUS:.*//g')
+          HTTP_STATUS=$(echo "$HTTP_RESPONSE" | tr -d '\n' | sed -e 's/.*HTTP_STATUS://')
+
+          echo "Response HTTP Status: ${HTTP_STATUS}"
+          echo "Response Body: ${HTTP_BODY}"
+
+          if [ "${HTTP_STATUS}" -eq 200 ]; then
+            echo "✅ Monitoring cycle executed successfully."
+            exit 0
+          elif [ "${HTTP_STATUS}" -eq 409 ]; then
+            echo "⚠️ Cycle already in progress on server (idempotent skipped)."
+            exit 0
+          else
+            echo "::error::Monitoring cycle failed with status ${HTTP_STATUS}"
+            exit 1
+          fi
+
