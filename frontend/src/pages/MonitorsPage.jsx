@@ -1,11 +1,12 @@
 import React, { useEffect, useState, useCallback } from "react";
+import { Link } from "react-router-dom";
 import Card from "../components/common/Card";
 import MonitorTable from "../components/monitors/MonitorTable";
 import MonitorFormModal from "../components/monitors/MonitorFormModal";
 import ConfirmDialog from "../components/common/ConfirmDialog";
 import EmptyState from "../components/common/EmptyState";
 import { TableSkeleton } from "../components/common/Skeleton";
-import { Plus, Search, RefreshCw } from "lucide-react";
+import { Plus, Search, RefreshCw, Sparkles } from "lucide-react";
 import toast from "react-hot-toast";
 
 const API_URL = import.meta.env.VITE_API_URL || "http://localhost:4001/api";
@@ -173,17 +174,27 @@ export default function MonitorsPage() {
           </p>
         </div>
 
-        <button
-          type="button"
-          onClick={() => {
-            setEditingMonitor(null);
-            setIsModalOpen(true);
-          }}
-          className="inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-medium text-white bg-[#0E7A88] hover:bg-[#0b6672] active:bg-[#084d56] rounded-lg transition-colors shadow-2xs cursor-pointer self-start sm:self-auto"
-        >
-          <Plus className="w-4 h-4" />
-          <span>Add Monitor</span>
-        </button>
+        <div className="flex items-center gap-2 self-start sm:self-auto">
+          <Link
+            to="/tester"
+            className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-semibold text-slate-700 dark:text-slate-200 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-700/60 rounded-lg transition-colors shadow-2xs"
+          >
+            <Sparkles className="w-3.5 h-3.5 text-[#0E7A88]" />
+            <span>API Tester</span>
+          </Link>
+
+          <button
+            type="button"
+            onClick={() => {
+              setEditingMonitor(null);
+              setIsModalOpen(true);
+            }}
+            className="inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-medium text-white bg-[#0E7A88] hover:bg-[#0b6672] active:bg-[#084d56] rounded-lg transition-colors shadow-2xs cursor-pointer"
+          >
+            <Plus className="w-4 h-4" />
+            <span>Add Monitor</span>
+          </button>
+        </div>
       </div>
 
       {/* Filter and Search Bar */}

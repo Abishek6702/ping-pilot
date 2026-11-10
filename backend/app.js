@@ -18,6 +18,7 @@ const historyRoutes = require("./routes/historyRoutes");
 const settingsRoutes = require("./routes/settingsRoutes");
 const workerRoutes = require("./routes/workerRoutes");
 const adminRoutes = require("./routes/adminRoutes");
+const testerRoutes = require("./routes/testerRoutes");
 
 const app = express();
 
@@ -90,8 +91,7 @@ app.use(cookieParser());
 // 6. Response Compression
 app.use(compression());
 
-// --- ROUTES ---
-app.use("/health", healthRoutes);
+// --- ROUTES -s);
 app.use("/api/health", healthRoutes);
 app.use("/api/auth", authRoutes);
 app.use("/api/monitors", monitorRoutes);
@@ -100,6 +100,7 @@ app.use("/api/history", historyRoutes);
 app.use("/api/settings", settingsRoutes);
 app.use("/api/admin", adminRoutes);
 app.use("/api/internal", workerRoutes);
+app.use("/api/tester", testerRoutes);
 
 // --- ERROR HANDLING ---
 app.use(notFound);

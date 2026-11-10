@@ -6,6 +6,7 @@ import {
   Activity,
   History,
   Settings,
+  Sparkles,
   Users,
   ShieldCheck,
   X,
@@ -19,6 +20,7 @@ export default function Sidebar({ isOpen, onClose }) {
     { name: "Overview", to: "/", icon: LayoutDashboard },
     { name: "Monitors", to: "/monitors", icon: Activity },
     { name: "Monitoring History", to: "/history", icon: History },
+    { name: "API Tester", to: "/tester", icon: Sparkles },
     { name: "Settings", to: "/settings", icon: Settings },
   ];
 
