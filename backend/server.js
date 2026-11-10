@@ -1,7 +1,6 @@
 const path = require("path");
 const dotenv = require("dotenv");
 
-// Load env vars from backend/.env regardless of current working directory
 dotenv.config({ path: path.join(__dirname, ".env") });
 
 const validateEnv = require("./config/validateEnv");
