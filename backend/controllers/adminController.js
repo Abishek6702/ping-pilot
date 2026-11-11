@@ -117,11 +117,11 @@ async function toggleUserStatus(req, res, next) {
       });
     }
 
-    const adminEmail = (process.env.ADMIN_EMAIL || process.env.EMAIL || "").toLowerCase().trim();
-    if (targetUser.email.toLowerCase() === adminEmail) {
+    const adminEmails = getAdminEmails();
+    if (adminEmails.includes(targetUser.email.toLowerCase().trim())) {
       return res.status(400).json({
         success: false,
-        error: "Cannot deactivate the primary system administrator account",
+        error: "Cannot deactivate a system administrator account",
       });
     }
 

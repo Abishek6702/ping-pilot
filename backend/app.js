@@ -9,6 +9,7 @@ const cookieParser = require("cookie-parser");
 
 const { apiLimiter } = require("./middleware/rateLimiter");
 const { notFound, errorHandler } = require("./middleware/errorHandler");
+const { logEvent } = require("./utils/logger");
 
 const healthRoutes = require("./routes/healthRoutes");
 const authRoutes = require("./routes/authRoutes");
@@ -19,6 +20,11 @@ const settingsRoutes = require("./routes/settingsRoutes");
 const workerRoutes = require("./routes/workerRoutes");
 const adminRoutes = require("./routes/adminRoutes");
 const testerRoutes = require("./routes/testerRoutes");
+const incidentRoutes = require("./routes/incidentRoutes");
+const analyticsRoutes = require("./routes/analyticsRoutes");
+const statusPageRoutes = require("./routes/statusPageRoutes");
+const publicStatusRoutes = require("./routes/publicStatusRoutes");
+const reportRoutes = require("./routes/reportRoutes");
 
 const app = express();
 
@@ -91,7 +97,26 @@ app.use(cookieParser());
 // 6. Response Compression
 app.use(compression());
 
-// --- ROUTES -s);
+// 7. Structured operational telemetry for slow or failed API requests
+if (process.env.NODE_ENV !== "test") {
+  app.use((req, res, next) => {
+    const startTime = Date.now();
+    res.on("finish", () => {
+      const durationMs = Date.now() - startTime;
+      if (res.statusCode >= 500 || durationMs >= 2000) {
+        logEvent(res.statusCode >= 500 ? "error" : "warn", "http.request", {
+          method: req.method,
+          path: req.originalUrl,
+          statusCode: res.statusCode,
+          durationMs,
+        });
+      }
+    });
+    next();
+  });
+}
+
+// --- ROUTES ---
 app.use("/api/health", healthRoutes);
 app.use("/api/auth", authRoutes);
 app.use("/api/monitors", monitorRoutes);
@@ -101,6 +126,11 @@ app.use("/api/settings", settingsRoutes);
 app.use("/api/admin", adminRoutes);
 app.use("/api/internal", workerRoutes);
 app.use("/api/tester", testerRoutes);
+app.use("/api/incidents", incidentRoutes);
+app.use("/api/analytics", analyticsRoutes);
+app.use("/api/status-pages", statusPageRoutes);
+app.use("/api/public/status", publicStatusRoutes);
+app.use("/api/reports", reportRoutes);
 
 // --- ERROR HANDLING ---
 app.use(notFound);

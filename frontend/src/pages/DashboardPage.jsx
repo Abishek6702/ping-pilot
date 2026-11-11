@@ -1,5 +1,6 @@
 import React, { useEffect, useState, useCallback } from "react";
 import { useSelector } from "react-redux";
+import { Link } from "react-router-dom";
 import Card from "../components/common/Card";
 import StatusBadge from "../components/common/StatusBadge";
 import ResponseTimeChart from "../components/charts/ResponseTimeChart";
@@ -18,6 +19,8 @@ import {
   TrendingUp,
   Plus,
   RefreshCw,
+  AlertTriangle,
+  ArrowRight,
 } from "lucide-react";
 import toast from "react-hot-toast";
 
@@ -244,6 +247,32 @@ export default function DashboardPage() {
         </div>
       </div>
 
+      {/* Active Incidents Alert Banner */}
+      {metrics.activeIncidentsCount > 0 && (
+        <Card className="p-4 border-rose-200 dark:border-rose-900 bg-rose-50/80 dark:bg-rose-950/30 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+          <div className="flex items-start sm:items-center gap-3">
+            <div className="p-2 rounded-lg bg-rose-100 dark:bg-rose-900/50 text-rose-600 dark:text-rose-400 shrink-0">
+              <AlertTriangle className="w-4 h-4" />
+            </div>
+            <div>
+              <p className="text-sm font-semibold text-rose-900 dark:text-rose-200">
+                {metrics.activeIncidentsCount} Active Service Outage{metrics.activeIncidentsCount === 1 ? "" : "s"}
+              </p>
+              <p className="text-xs text-rose-700 dark:text-rose-300">
+                {dashboardData?.activeIncidents?.[0]?.title || "Monitoring detected endpoint failures."}
+              </p>
+            </div>
+          </div>
+          <Link
+            to="/incidents"
+            className="inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-semibold rounded-lg bg-rose-600 text-white hover:bg-rose-700 transition-colors self-start sm:self-auto shrink-0"
+          >
+            Inspect Incidents
+            <ArrowRight className="w-3.5 h-3.5" />
+          </Link>
+        </Card>
+      )}
+
       {/* Summary Cards */}
       {loading && !dashboardData ? (
         <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3.5">
@@ -306,8 +335,14 @@ export default function DashboardPage() {
               <Zap className="w-4 h-4" />
             </div>
             <div className="text-2xl font-bold text-slate-900 dark:text-white">
-              {metrics.averageResponseTime}
-              <span className="text-xs font-normal text-slate-400 ml-1">ms</span>
+              {metrics.averageResponseTime !== null && metrics.averageResponseTime !== undefined ? (
+                <>
+                  {metrics.averageResponseTime}
+                  <span className="text-xs font-normal text-slate-400 ml-1">ms</span>
+                </>
+              ) : (
+                <span className="text-lg text-slate-400">—</span>
+              )}
             </div>
             <div className="text-[11px] text-slate-400 mt-1">Last {timeRange}</div>
           </Card>
@@ -319,7 +354,11 @@ export default function DashboardPage() {
               <TrendingUp className="w-4 h-4" />
             </div>
             <div className="text-2xl font-bold text-slate-900 dark:text-white">
-              {metrics.overallUptime}%
+              {metrics.overallUptime !== null && metrics.overallUptime !== undefined ? (
+                `${metrics.overallUptime}%`
+              ) : (
+                <span className="text-lg text-slate-400">No Data</span>
+              )}
             </div>
             <div className="text-[11px] text-slate-400 mt-1">Availability ratio</div>
           </Card>
@@ -328,8 +367,41 @@ export default function DashboardPage() {
 
       {/* Charts Section */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
-        <ResponseTimeChart data={charts} timeRange={timeRange} />
-        <UptimeChart data={charts} timeRange={timeRange} />
+        <Card className="p-5">
+          <div className="flex items-center justify-between mb-3">
+            <div>
+              <h3 className="text-sm font-semibold text-slate-900 dark:text-white">
+                Response Time Trend
+              </h3>
+              <p className="text-xs text-slate-400">Average latency (ms) over {timeRange}</p>
+            </div>
+            <Link
+              to="/analytics"
+              className="text-xs font-semibold text-[#0E7A88] dark:text-[#38b2ac] hover:underline"
+            >
+              Deep Analytics →
+            </Link>
+          </div>
+          <ResponseTimeChart data={charts} timeRange={timeRange} />
+        </Card>
+
+        <Card className="p-5">
+          <div className="flex items-center justify-between mb-3">
+            <div>
+              <h3 className="text-sm font-semibold text-slate-900 dark:text-white">
+                Availability Trend
+              </h3>
+              <p className="text-xs text-slate-400">Uptime % over {timeRange}</p>
+            </div>
+            <Link
+              to="/reports"
+              className="text-xs font-semibold text-[#0E7A88] dark:text-[#38b2ac] hover:underline"
+            >
+              Export Reports →
+            </Link>
+          </div>
+          <UptimeChart data={charts} timeRange={timeRange} />
+        </Card>
       </div>
 
       {/* Monitors Overview Table */}

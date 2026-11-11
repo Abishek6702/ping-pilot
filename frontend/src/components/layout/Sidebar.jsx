@@ -11,6 +11,10 @@ import {
   ShieldCheck,
   X,
   Radio,
+  AlertTriangle,
+  BarChart3,
+  Globe,
+  FileText,
 } from "lucide-react";
 
 export default function Sidebar({ isOpen, onClose }) {
@@ -19,6 +23,10 @@ export default function Sidebar({ isOpen, onClose }) {
   const navItems = [
     { name: "Overview", to: "/", icon: LayoutDashboard },
     { name: "Monitors", to: "/monitors", icon: Activity },
+    { name: "Incidents", to: "/incidents", icon: AlertTriangle },
+    { name: "Analytics", to: "/analytics", icon: BarChart3 },
+    { name: "Status Pages", to: "/status-pages", icon: Globe },
+    { name: "Reports", to: "/reports", icon: FileText },
     { name: "Monitoring History", to: "/history", icon: History },
     { name: "API Tester", to: "/tester", icon: Sparkles },
     { name: "Settings", to: "/settings", icon: Settings },

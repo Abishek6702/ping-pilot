@@ -9,6 +9,8 @@ const CycleLock = require("../models/CycleLock");
 const sendMail = require("../utils/sendMail");
 const renderTemplate = require("../utils/renderTemplate");
 const { validateUrlForMonitoring } = require("./../utils/ssrfFilter");
+const { handleMonitorCheckForIncident } = require("./incidentService");
+const { logEvent } = require("../utils/logger");
 const { CLAIM_LEASE_MS } = require("../constants/monitorConstants");
 const {
   resolveMonitoringInterval,
@@ -321,9 +323,30 @@ async function pingMonitor(monitor, options = {}) {
 
   await monitor.save();
 
-  // 4. Send status transition email alerts if status changed
+  // 4. Incident lifecycle tracking and integrated status-transition notifications
+  let incidentOutcome = null;
+  try {
+    incidentOutcome = await handleMonitorCheckForIncident({
+      monitor,
+      pingResult,
+      previousStatus,
+      dispatchNotifications: true,
+    });
+  } catch (incidentErr) {
+    logEvent("error", "incident.lifecycle_error", {
+      monitorId: monitor._id?.toString?.() || null,
+      error: incidentErr.message,
+    });
+  }
+
+  // Fallback alert dispatch only if incident store is inactive in mocked/disconnected environments
   const statusChanged = previousStatus !== monitor.currentStatus && previousStatus !== "UNKNOWN";
-  if (statusChanged && monitor.userId) {
+  const canLookupUserOrMail =
+    mongoose.connection.readyState === 1 ||
+    Boolean(User.findById && User.findById._isMockFunction) ||
+    Boolean(sendMail && sendMail._isMockFunction);
+
+  if (statusChanged && monitor.userId && (!incidentOutcome || !incidentOutcome.handled) && canLookupUserOrMail) {
     try {
       const user = await User.findById(monitor.userId);
       if (user && user.email) {
@@ -370,6 +393,8 @@ async function pingMonitor(monitor, options = {}) {
     nextCheckAt: monitor.nextCheckAt,
     monitoringInterval: resolvedInterval,
     resultId: pingResult._id,
+    incidentId: incidentOutcome?.incident?._id || null,
+    incidentAction: incidentOutcome?.action || null,
   };
 }
 

@@ -93,17 +93,23 @@ export default function MonitorTable({
 
                 {/* Uptime % */}
                 <td className="py-3.5 px-4">
-                  <span
-                    className={`font-semibold ${
-                      (m.uptimePercentage ?? 100) >= 99
-                        ? "text-emerald-600 dark:text-emerald-400"
-                        : (m.uptimePercentage ?? 100) >= 95
-                        ? "text-amber-600 dark:text-amber-400"
-                        : "text-rose-600 dark:text-rose-400"
-                    }`}
-                  >
-                    {m.uptimePercentage !== undefined ? `${m.uptimePercentage}%` : "100%"}
-                  </span>
+                  {m.uptimePercentage !== null && m.uptimePercentage !== undefined ? (
+                    <span
+                      className={`font-semibold ${
+                        m.uptimePercentage >= 99
+                          ? "text-emerald-600 dark:text-emerald-400"
+                          : m.uptimePercentage >= 95
+                          ? "text-amber-600 dark:text-amber-400"
+                          : "text-rose-600 dark:text-rose-400"
+                      }`}
+                    >
+                      {m.uptimePercentage}%
+                    </span>
+                  ) : (
+                    <span className="text-xs font-medium text-slate-400">
+                      {m.isActive ? "No Data" : "Paused"}
+                    </span>
+                  )}
                 </td>
 
                 {/* Last Checked */}

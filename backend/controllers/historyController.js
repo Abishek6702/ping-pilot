@@ -1,6 +1,7 @@
 const mongoose = require("mongoose");
 const PingResult = require("../models/PingResult");
 const Monitor = require("../models/Monitor");
+const { canAccessMonitor } = require("../utils/ownership");
 
 /**
  * Get global monitoring history with filtering and pagination
@@ -101,24 +102,7 @@ async function getMonitorHistory(req, res, next) {
       return res.status(404).json({ success: false, error: "Monitor not found" });
     }
 
-    if (
-      req.user &&
-      req.user.role !== "admin" &&
-      monitor.userId &&
-      monitor.userId.toString() !== req.user._id.toString()
-    ) {
-      return res.status(403).json({
-        success: false,
-        error: "You do not have permission to view stats for this monitor",
-      });
-    }
-
-    if (
-      req.user &&
-      req.user.role !== "admin" &&
-      monitor.userId &&
-      monitor.userId.toString() !== req.user._id.toString()
-    ) {
+    if (!canAccessMonitor(req.user, monitor)) {
       return res.status(403).json({
         success: false,
         error: "You do not have permission to view history for this monitor",
@@ -180,12 +164,7 @@ async function getMonitorStats(req, res, next) {
       return res.status(404).json({ success: false, error: "Monitor not found" });
     }
 
-    if (
-      req.user &&
-      req.user.role !== "admin" &&
-      monitor.userId &&
-      monitor.userId.toString() !== req.user._id.toString()
-    ) {
+    if (!canAccessMonitor(req.user, monitor)) {
       return res.status(403).json({
         success: false,
         error: "You do not have permission to view stats for this monitor",

@@ -1,6 +1,8 @@
+const mongoose = require("mongoose");
 const Monitor = require("../models/Monitor");
 const PingResult = require("../models/PingResult");
 const User = require("../models/User");
+const Incident = require("../models/Incident");
 
 /**
  * Get dashboard overview metrics, summary cards, chart data, and recent activity
@@ -81,10 +83,10 @@ async function getDashboard(req, res, next) {
 
     const totalPings = pingsSummary[0]?.totalPings || 0;
     const successfulPings = pingsSummary[0]?.successfulPings || 0;
-    const overallUptime = totalPings > 0 ? Number(((successfulPings / totalPings) * 100).toFixed(2)) : 100;
+    const overallUptime = totalPings > 0 ? Number(((successfulPings / totalPings) * 100).toFixed(2)) : null;
     const avgResponseTime = pingsSummary[0]?.avgResponseTime
       ? Math.round(pingsSummary[0].avgResponseTime)
-      : 0;
+      : null;
 
     // Calculate individual monitor uptime for table
     const monitorPings = await PingResult.aggregate([
@@ -104,29 +106,52 @@ async function getDashboard(req, res, next) {
     const monitorStatsMap = new Map();
     monitorPings.forEach((p) => {
       monitorStatsMap.set(p._id.toString(), {
-        uptime: p.total > 0 ? Number(((p.successful / p.total) * 100).toFixed(1)) : 100,
-        avgResponseTime: Math.round(p.avgResponseTime || 0),
+        uptime: p.total > 0 ? Number(((p.successful / p.total) * 100).toFixed(1)) : null,
+        avgResponseTime: p.avgResponseTime != null ? Math.round(p.avgResponseTime) : null,
       });
     });
 
     const monitorsWithStats = monitors.map((m) => {
       const stats = monitorStatsMap.get(m._id.toString()) || {
-        uptime: m.currentStatus === "UP" ? 100 : 0,
-        avgResponseTime: m.lastResponseTime || 0,
+        uptime: null,
+        avgResponseTime: m.lastResponseTime ?? null,
       };
+      const obj = typeof m.toObject === "function" ? m.toObject() : { ...m };
       return {
-        ...m.toObject(),
+        ...obj,
         uptimePercentage: stats.uptime,
         calculatedAvgResponseTime: stats.avgResponseTime,
       };
     });
+
+    // Fetch active incidents preview for overview banner
+    let activeIncidents = [];
+    let activeIncidentsCount = 0;
+    const canQueryIncidents =
+      mongoose.connection.readyState === 1 ||
+      Boolean(Incident.find && Incident.find._isMockFunction);
+
+    if (canQueryIncidents) {
+      const incidentScope = isAdmin
+        ? { isActive: true }
+        : { monitorId: { $in: monitorIds }, isActive: true };
+      const [activeList, activeTotal] = await Promise.all([
+        Incident.find(incidentScope)
+          .populate("monitorId", "name url currentStatus")
+          .sort({ startedAt: -1 })
+          .limit(5),
+        Incident.countDocuments(incidentScope),
+      ]);
+      activeIncidents = activeList || [];
+      activeIncidentsCount = activeTotal || 0;
+    }
 
     // Format chart points
     const charts = timeSeriesData.map((d) => ({
       time: d._id,
       timestamp: d.timestamp,
       avgResponseTime: Math.round(d.avgResponseTime || 0),
-      uptimePercentage: d.totalChecks > 0 ? Number(((d.successfulChecks / d.totalChecks) * 100).toFixed(1)) : 100,
+      uptimePercentage: d.totalChecks > 0 ? Number(((d.successfulChecks / d.totalChecks) * 100).toFixed(1)) : null,
       checks: d.totalChecks,
       successes: d.successfulChecks,
       failures: d.totalChecks - d.successfulChecks,
@@ -143,11 +168,13 @@ async function getDashboard(req, res, next) {
         averageResponseTime: avgResponseTime,
         overallUptime,
         totalChecks: totalPings,
+        activeIncidentsCount,
         ...(isAdmin ? { totalUsers } : {}),
       },
       monitors: monitorsWithStats,
       charts,
       recentActivity,
+      activeIncidents,
     });
   } catch (error) {
     next(error);

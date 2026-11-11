@@ -12,6 +12,11 @@ import HistoryPage from "./pages/HistoryPage";
 import SettingsPage from "./pages/SettingsPage";
 import AdminUsersPage from "./pages/AdminUsersPage";
 import ApiTesterPage from "./pages/ApiTesterPage";
+import IncidentsPage from "./pages/IncidentsPage";
+import AnalyticsPage from "./pages/AnalyticsPage";
+import StatusPagesPage from "./pages/StatusPagesPage";
+import PublicStatusPage from "./pages/PublicStatusPage";
+import ReportsPage from "./pages/ReportsPage";
 import NotFoundPage from "./pages/NotFoundPage";
 import { Toaster } from "react-hot-toast";
 
@@ -127,6 +132,9 @@ export default function App() {
         {/* Login Page with blurred dashboard backdrop and centered modal */}
         <Route path="/login" element={<LoginPage />} />
 
+        {/* Unauthenticated Public Status Pages */}
+        <Route path="/status/:slug" element={<PublicStatusPage />} />
+
         {/* Authenticated Application Routes */}
         <Route
           element={
@@ -137,6 +145,10 @@ export default function App() {
         >
           <Route path="/monitors" element={<MonitorsPage />} />
           <Route path="/monitors/:id" element={<MonitorDetailsPage />} />
+          <Route path="/incidents" element={<IncidentsPage />} />
+          <Route path="/analytics" element={<AnalyticsPage />} />
+          <Route path="/status-pages" element={<StatusPagesPage />} />
+          <Route path="/reports" element={<ReportsPage />} />
           <Route path="/history" element={<HistoryPage />} />
           <Route path="/tester" element={<ApiTesterPage />} />
           <Route path="/settings" element={<SettingsPage />} />

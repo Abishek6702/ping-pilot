@@ -132,7 +132,13 @@ async function validateUrlForMonitoring(urlString, options = {}) {
     return { valid: false, error: "Only HTTP and HTTPS protocols are supported" };
   }
 
-  const hostname = parsed.hostname.toLowerCase();
+  const rawHostname = parsed.hostname.toLowerCase();
+  const hostname = rawHostname.replace(/^\[|\]$/g, "");
+
+  // Reject credentials embedded in URLs (e.g. http://user:pass@host)
+  if (parsed.username || parsed.password) {
+    return { valid: false, error: "Embedded URL credentials are not permitted" };
+  }
 
   // 2. Reject empty hostname
   if (!hostname) {
@@ -140,7 +146,11 @@ async function validateUrlForMonitoring(urlString, options = {}) {
   }
 
   // 3. Reject cloud metadata endpoints (always prohibited)
-  if (CLOUD_METADATA_HOSTNAMES.has(hostname) || hostname === "169.254.169.254") {
+  if (
+    CLOUD_METADATA_HOSTNAMES.has(hostname) ||
+    hostname === "169.254.169.254" ||
+    hostname === "100.100.100.200"
+  ) {
     return { valid: false, error: "Access to cloud metadata endpoints is prohibited" };
   }
 

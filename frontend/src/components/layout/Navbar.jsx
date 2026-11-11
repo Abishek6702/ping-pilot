@@ -16,6 +16,10 @@ import {
   Settings,
   Sparkles,
   X,
+  AlertTriangle,
+  BarChart3,
+  Globe,
+  FileText,
 } from "lucide-react";
 import { toggleTheme } from "../../store/slices/themeSlice";
 import { clearAuth } from "../../store/slices/authSlice";
@@ -41,11 +45,15 @@ export default function Navbar({ onOpenSidebar, pageTitle = "Dashboard", isAdmin
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const dropdownRef = useRef(null);
 
-  // User navlinks: Settings is intentionally hidden from the center tabs (available in profile dropdown)
+  // User navlinks: Settings is placed inside profile dropdown
   const userNavLinks = [
     { name: "Overview", to: "/", icon: LayoutDashboard },
     { name: "Monitors", to: "/monitors", icon: Activity },
-    { name: "Monitoring History", to: "/history", icon: History },
+    { name: "Incidents", to: "/incidents", icon: AlertTriangle },
+    { name: "Analytics", to: "/analytics", icon: BarChart3 },
+    { name: "Status Pages", to: "/status-pages", icon: Globe },
+    { name: "Reports", to: "/reports", icon: FileText },
+    { name: "History", to: "/history", icon: History },
     { name: "API Tester", to: "/tester", icon: Sparkles },
   ];
 
@@ -81,7 +89,7 @@ export default function Navbar({ onOpenSidebar, pageTitle = "Dashboard", isAdmin
     <header className="sticky top-0 z-30 h-16 bg-white/85 dark:bg-slate-900/85 backdrop-blur-md border-b border-slate-200 dark:border-slate-800 transition-colors">
       <div
         className={`h-full flex items-center justify-between px-4 sm:px-6 relative ${
-          !isAdmin ? "max-w-6xl mx-auto w-full" : ""
+          !isAdmin ? "max-w-7xl mx-auto w-full gap-3" : ""
         }`}
       >
         {/* Left Section */}
@@ -113,9 +121,9 @@ export default function Navbar({ onOpenSidebar, pageTitle = "Dashboard", isAdmin
           )}
         </div>
 
-        {/* Regular User Center: Centered Navigation Tabs (Settings hidden) */}
+        {/* Regular User Center: Responsive Navigation Tabs */}
         {!isAdmin && (
-          <nav className="hidden md:flex items-center gap-1.5 absolute left-1/2 -translate-x-1/2">
+          <nav className="hidden xl:flex flex-1 items-center justify-center gap-1 overflow-x-auto mx-2">
             {userNavLinks.map((item) => {
               const Icon = item.icon;
               return (
@@ -124,7 +132,7 @@ export default function Navbar({ onOpenSidebar, pageTitle = "Dashboard", isAdmin
                   to={item.to}
                   end={item.to === "/"}
                   className={({ isActive }) =>
-                    `flex items-center gap-2 px-3.5 py-1.5 rounded-lg text-xs font-semibold transition-all ${
+                    `flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap shrink-0 transition-all ${
                       isActive
                         ? "bg-[#0E7A88]/15 text-[#0E7A88] dark:bg-[#0E7A88]/25 dark:text-[#38b2ac] shadow-2xs font-bold"
                         : "text-slate-600 hover:text-slate-900 dark:text-slate-400 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800/60"
@@ -239,12 +247,12 @@ export default function Navbar({ onOpenSidebar, pageTitle = "Dashboard", isAdmin
             )}
           </div>
 
-          {/* Regular User Mobile Hamburger */}
+          {/* Regular User Mobile/Tablet Hamburger */}
           {!isAdmin && (
             <button
               type="button"
               onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
-              className="p-2 text-slate-500 hover:text-slate-700 dark:text-slate-400 md:hidden rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 cursor-pointer"
+              className="p-2 text-slate-500 hover:text-slate-700 dark:text-slate-400 xl:hidden rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 cursor-pointer"
             >
               {mobileMenuOpen ? <X className="w-5 h-5" /> : <Menu className="w-5 h-5" />}
             </button>
@@ -252,9 +260,9 @@ export default function Navbar({ onOpenSidebar, pageTitle = "Dashboard", isAdmin
         </div>
       </div>
 
-      {/* Regular User Mobile Navigation Drawer */}
+      {/* Regular User Mobile/Tablet Navigation Drawer */}
       {!isAdmin && mobileMenuOpen && (
-        <div className="md:hidden border-b border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 px-4 py-3 space-y-1 shadow-lg">
+        <div className="xl:hidden border-b border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 px-4 py-3 grid grid-cols-2 sm:grid-cols-4 gap-1.5 shadow-lg">
           {userNavLinks.map((item) => {
             const Icon = item.icon;
             return (

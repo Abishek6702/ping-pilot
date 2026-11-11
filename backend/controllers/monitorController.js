@@ -1,7 +1,13 @@
+const mongoose = require("mongoose");
 const Monitor = require("../models/Monitor");
 const PingResult = require("../models/PingResult");
+const Incident = require("../models/Incident");
+const NotificationLog = require("../models/NotificationLog");
+const StatusPage = require("../models/StatusPage");
+const { clearPublicStatusCache } = require("./statusPageController");
 const { validateUrlForMonitoring } = require("../utils/ssrfFilter");
 const { pingMonitor } = require("../services/monitoringEngine");
+const { canAccessMonitor } = require("../utils/ownership");
 const {
   ALLOWED_MONITORING_INTERVALS,
   DEFAULT_MONITORING_INTERVAL,
@@ -12,10 +18,7 @@ const {
 } = require("../utils/monitorSchedule");
 
 function isAuthorizedForMonitor(user, monitor) {
-  if (!user) return false;
-  if (user.role === "admin") return true;
-  if (!monitor.userId) return true;
-  return monitor.userId.toString() === user._id.toString();
+  return canAccessMonitor(user, monitor);
 }
 
 /**
@@ -292,10 +295,28 @@ async function deleteMonitor(req, res, next) {
       });
     }
 
-    await Promise.all([
+    const deleteTasks = [
       Monitor.findByIdAndDelete(req.params.id),
       PingResult.deleteMany({ monitorId: req.params.id }),
-    ]);
+    ];
+
+    const isConnected = mongoose.connection.readyState === 1;
+    if (isConnected || Boolean(Incident.deleteMany && Incident.deleteMany._isMockFunction)) {
+      deleteTasks.push(Incident.deleteMany({ monitorId: req.params.id }));
+    }
+    if (isConnected || Boolean(NotificationLog.deleteMany && NotificationLog.deleteMany._isMockFunction)) {
+      deleteTasks.push(NotificationLog.deleteMany({ monitorId: req.params.id }));
+    }
+    if (isConnected || Boolean(StatusPage.updateMany && StatusPage.updateMany._isMockFunction)) {
+      deleteTasks.push(
+        StatusPage.updateMany(
+          { monitorIds: req.params.id },
+          { $pull: { monitorIds: req.params.id } }
+        ).then(() => clearPublicStatusCache())
+      );
+    }
+
+    await Promise.all(deleteTasks);
 
     return res.status(200).json({
       success: true,

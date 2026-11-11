@@ -15,7 +15,12 @@ export default function Layout({ children }) {
     if (pathname === "/") return "Overview";
     if (pathname.startsWith("/monitors/")) return "Monitor Details";
     if (pathname.startsWith("/monitors")) return "Monitors";
+    if (pathname.startsWith("/incidents")) return "Incidents";
+    if (pathname.startsWith("/analytics")) return "Analytics";
+    if (pathname.startsWith("/status-pages")) return "Status Pages";
+    if (pathname.startsWith("/reports")) return "Reports & Exports";
     if (pathname.startsWith("/history")) return "Monitoring History";
+    if (pathname.startsWith("/tester")) return "API Tester";
     if (pathname.startsWith("/settings")) return "Settings";
     if (pathname.startsWith("/admin")) return "Platform Administration";
     return "PingPilot";
@@ -39,11 +44,7 @@ export default function Layout({ children }) {
           pageTitle={getPageTitle(location.pathname)}
           isAdmin={isAdmin}
         />
-        <main
-          className={`flex-1 p-4 sm:p-6 lg:p-8 w-full mx-auto ${
-            isAdmin ? "max-w-7xl" : "max-w-6xl"
-          }`}
-        >
+        <main className="flex-1 p-4 sm:p-6 lg:p-8 w-full mx-auto max-w-7xl">
           {children || <Outlet />}
         </main>
       </div>
