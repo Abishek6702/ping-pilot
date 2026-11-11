@@ -1,19 +1,87 @@
 const { performance } = require("perf_hooks");
+const crypto = require("crypto");
+const mongoose = require("mongoose");
 const Monitor = require("../models/Monitor");
 const PingResult = require("../models/PingResult");
 const SystemSetting = require("../models/SystemSetting");
 const User = require("../models/User");
+const CycleLock = require("../models/CycleLock");
 const sendMail = require("../utils/sendMail");
 const renderTemplate = require("../utils/renderTemplate");
 const { validateUrlForMonitoring } = require("./../utils/ssrfFilter");
 
+const LOCK_KEY = "monitoring-cycle";
+const LOCK_LEASE_MS = 3 * 60 * 1000;
+
 let isCycleRunning = false;
+
+/**
+ * Safely closes/cancels a Fetch Response body stream so sockets are not leaked.
+ */
+async function drainResponseBody(response) {
+  if (response && response.body && typeof response.body.cancel === "function") {
+    await response.body.cancel().catch(() => {});
+  }
+}
+
+/**
+ * Acquires a distributed cross-instance lease lock in MongoDB when connected.
+ * Returns true if lock acquired (or DB is disconnected in isolated unit tests), false if held elsewhere.
+ */
+async function acquireDistributedLock(owner, forceDbLock = false) {
+  if (!forceDbLock && mongoose.connection.readyState !== 1) {
+    return true;
+  }
+
+  const now = new Date();
+  const lockedUntil = new Date(now.getTime() + LOCK_LEASE_MS);
+
+  try {
+    const lockDoc = await CycleLock.findOneAndUpdate(
+      {
+        key: LOCK_KEY,
+        $or: [{ lockedUntil: { $lte: now } }, { lockedUntil: null }],
+      },
+      {
+        $set: {
+          key: LOCK_KEY,
+          owner,
+          lockedUntil,
+          acquiredAt: now,
+        },
+      },
+      { upsert: true, returnDocument: "after" }
+    );
+
+    return Boolean(lockDoc && lockDoc.owner === owner);
+  } catch (err) {
+    if (err && err.code === 11000) {
+      return false;
+    }
+    throw err;
+  }
+}
+
+/**
+ * Releases the distributed lock only if still owned by this cycle execution.
+ */
+async function releaseDistributedLock(owner, forceDbLock = false) {
+  if (!forceDbLock && mongoose.connection.readyState !== 1) {
+    return;
+  }
+
+  await CycleLock.updateOne(
+    { key: LOCK_KEY, owner },
+    { $set: { lockedUntil: new Date(0) } }
+  );
+}
 
 /**
  * Execute a single HTTP ping against a monitor with SSRF checks, redirect safety, and timeout handling.
  */
 async function pingMonitor(monitor, options = {}) {
-  const retentionDays = options.retentionDays || 30;
+  const safeOptions = options && typeof options === "object" ? options : {};
+  const retentionDays = Math.max(1, Number(safeOptions.retentionDays) || 30);
   const startTime = performance.now();
   let statusCode = null;
   let isSuccess = false;
@@ -63,6 +131,8 @@ async function pingMonitor(monitor, options = {}) {
       // Handle redirect status codes (301, 302, 303, 307, 308)
       if ([301, 302, 303, 307, 308].includes(statusCode)) {
         const locationHeader = response.headers.get("location");
+        await drainResponseBody(response);
+
         if (!locationHeader) {
           break; // No location header to follow
         }
@@ -77,6 +147,8 @@ async function pingMonitor(monitor, options = {}) {
         redirectCount++;
         continue;
       }
+
+      await drainResponseBody(response);
 
       // Reached final destination
       break;
@@ -94,19 +166,23 @@ async function pingMonitor(monitor, options = {}) {
     if (err.name === "AbortError" || err.message?.includes("aborted")) {
       errorMessage = `Connection timed out after ${monitor.timeout || 15}s`;
     } else {
-      errorMessage = err.message || "Network request failed";
+      const causeDetail = err.cause?.code || err.cause?.message;
+      errorMessage = causeDetail
+        ? `${err.message || "Network request failed"} (${causeDetail})`
+        : err.message || "Network request failed";
     }
   }
 
-  // 2. Save PingResult in MongoDB with 30-day TTL expiration
-  const expiresAt = new Date(Date.now() + retentionDays * 24 * 60 * 60 * 1000);
+  // 2. Save PingResult in MongoDB with TTL expiration
+  const checkedAt = new Date();
+  const expiresAt = new Date(checkedAt.getTime() + retentionDays * 24 * 60 * 60 * 1000);
   const pingResult = await PingResult.create({
     monitorId: monitor._id,
     status: isSuccess ? "UP" : "DOWN",
     statusCode,
     responseTime,
     errorMessage,
-    checkedAt: new Date(),
+    checkedAt,
     expiresAt,
   });
 
@@ -127,15 +203,10 @@ async function pingMonitor(monitor, options = {}) {
     // Change to DOWN only if failure threshold reached
     if (monitor.consecutiveFailures >= failureThreshold) {
       monitor.currentStatus = "DOWN";
-    } else if (previousStatus === "UNKNOWN") {
-      // If UNKNOWN and failed first time, keep UNKNOWN or set DOWN depending on threshold
-      if (monitor.consecutiveFailures >= failureThreshold) {
-        monitor.currentStatus = "DOWN";
-      }
     }
   }
 
-  monitor.lastCheckedAt = new Date();
+  monitor.lastCheckedAt = checkedAt;
   monitor.lastResponseTime = responseTime;
 
   await monitor.save();
@@ -152,7 +223,7 @@ async function pingMonitor(monitor, options = {}) {
             url: monitor.url,
             failureCount: monitor.consecutiveFailures,
             errorMessage: monitor.lastError,
-            time: new Date().toUTCString(),
+            time: checkedAt.toUTCString(),
           });
           sendMail(user.email, `⚠️ Service Alert: ${monitor.name} is DOWN`, html).catch((err) =>
             console.error("Failed to send DOWN alert email:", err.message)
@@ -162,7 +233,7 @@ async function pingMonitor(monitor, options = {}) {
             serviceName: monitor.name,
             url: monitor.url,
             responseTime,
-            time: new Date().toUTCString(),
+            time: checkedAt.toUTCString(),
           });
           sendMail(user.email, `✅ Service Recovered: ${monitor.name} is Back Online`, html).catch((err) =>
             console.error("Failed to send recovery alert email:", err.message)
@@ -189,9 +260,30 @@ async function pingMonitor(monitor, options = {}) {
 }
 
 /**
- * Execute a complete monitoring cycle for all active monitors
+ * Deduplicates monitor list by _id so a monitor is checked at most once per cycle.
  */
-async function executeMonitoringCycle() {
+function deduplicateMonitors(monitors) {
+  const seen = new Set();
+  const unique = [];
+  for (const monitor of monitors) {
+    if (!monitor) continue;
+    const idKey = monitor._id ? monitor._id.toString() : null;
+    if (idKey) {
+      if (seen.has(idKey)) continue;
+      seen.add(idKey);
+    }
+    unique.push(monitor);
+  }
+  return unique;
+}
+
+/**
+ * Execute a complete monitoring cycle for all active monitors.
+ * Supports { force: boolean } to bypass cooldown interval checks when explicitly triggered.
+ */
+async function executeMonitoringCycle(options = {}) {
+  const safeOptions = options && typeof options === "object" ? options : {};
+
   if (isCycleRunning) {
     return {
       status: "skipped",
@@ -201,41 +293,61 @@ async function executeMonitoringCycle() {
   }
 
   isCycleRunning = true;
+  const lockOwner = `${process.pid}-${crypto.randomUUID()}`;
+  const forceDbLock = Boolean(safeOptions.forceDbLock);
+  let dbLockAcquired = false;
   const cycleStart = performance.now();
 
   try {
+    dbLockAcquired = await acquireDistributedLock(lockOwner, forceDbLock);
+    if (!dbLockAcquired) {
+      return {
+        status: "skipped",
+        reason: "A monitoring cycle is already in progress on another worker",
+        timestamp: new Date().toISOString(),
+      };
+    }
+
     // 1. Fetch system settings
     const retentionSetting = await SystemSetting.findOne({ key: "historyRetentionDays" });
-    const retentionDays = retentionSetting ? Number(retentionSetting.value) || 30 : 30;
+    const retentionDays = Math.max(1, Number(retentionSetting?.value) || 30);
 
-    // 2. Fetch all enabled monitors
-    const activeMonitors = await Monitor.find({ isActive: true });
+    // 2. Fetch all enabled monitors and deduplicate by ID
+    const rawActiveMonitors = await Monitor.find({ isActive: true });
+    const activeMonitors = deduplicateMonitors(Array.isArray(rawActiveMonitors) ? rawActiveMonitors : []);
 
-    // Filter monitors that are due based on their configured interval (prevents duplicate pings across multiple instances/restarts)
+    // 3. Filter monitors that are due based on their configured interval
     const now = Date.now();
     const monitorsToPing = activeMonitors.filter((monitor) => {
-      if (options.force) return true;
+      if (monitor.isActive === false) return false;
+      if (safeOptions.force) return true;
       if (!monitor.lastCheckedAt) return true;
       const intervalMs = (monitor.interval || 5) * 60 * 1000;
-      // Allow 45s buffer for clock/cron jitter, but block near-duplicate pings
-      return now - new Date(monitor.lastCheckedAt).getTime() >= intervalMs - 45000;
+      // Allow up to 15% (capped at 45s) buffer for cron/timer jitter while blocking duplicate pings
+      const jitterBufferMs = Math.min(45000, Math.floor(intervalMs * 0.15));
+      return now - new Date(monitor.lastCheckedAt).getTime() >= intervalMs - jitterBufferMs;
     });
+
+    const skippedCount = activeMonitors.length - monitorsToPing.length;
 
     if (monitorsToPing.length === 0) {
       return {
         status: "completed",
         totalMonitors: activeMonitors.length,
         checked: 0,
-        skipped: activeMonitors.length,
+        skipped: skippedCount,
         up: 0,
         down: 0,
-        reason: "All active monitors were checked recently and are not due yet",
+        reason:
+          activeMonitors.length === 0
+            ? "No active monitors configured"
+            : "All active monitors were checked recently and are not due yet",
         durationMs: Math.round(performance.now() - cycleStart),
         timestamp: new Date().toISOString(),
       };
     }
 
-    // 3. Execute checks with a concurrency batch limit (max 5 parallel requests)
+    // 4. Execute checks with a concurrency batch limit (max 5 parallel requests)
     const results = [];
     const concurrency = 5;
     for (let i = 0; i < monitorsToPing.length; i += concurrency) {
@@ -263,6 +375,7 @@ async function executeMonitoringCycle() {
       status: "completed",
       totalMonitors: activeMonitors.length,
       checked: results.length,
+      skipped: skippedCount,
       up: upCount,
       down: downCount,
       durationMs: Math.round(performance.now() - cycleStart),
@@ -270,6 +383,11 @@ async function executeMonitoringCycle() {
       results,
     };
   } finally {
+    if (dbLockAcquired) {
+      await releaseDistributedLock(lockOwner, forceDbLock).catch((err) => {
+        console.error("Failed to release distributed monitoring lock:", err.message);
+      });
+    }
     isCycleRunning = false;
   }
 }
@@ -277,5 +395,7 @@ async function executeMonitoringCycle() {
 module.exports = {
   pingMonitor,
   executeMonitoringCycle,
+  acquireDistributedLock,
+  releaseDistributedLock,
 };
 

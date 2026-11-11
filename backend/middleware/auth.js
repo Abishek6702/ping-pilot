@@ -1,3 +1,4 @@
+const crypto = require("crypto");
 const jwt = require("jsonwebtoken");
 const User = require("../models/User");
 const { COOKIE_NAME } = require("../utils/generateToken");
@@ -77,6 +78,18 @@ function adminOnly(req, res, next) {
 }
 
 /**
+ * Constant-time string comparison via SHA-256 digest to avoid leaking secret length or timing.
+ */
+function secretsMatch(provided, expected) {
+  if (typeof provided !== "string" || typeof expected !== "string") {
+    return false;
+  }
+  const digestA = crypto.createHash("sha256").update(provided, "utf8").digest();
+  const digestB = crypto.createHash("sha256").update(expected, "utf8").digest();
+  return crypto.timingSafeEqual(digestA, digestB);
+}
+
+/**
  * Authenticate internal worker requests via PINGPILOT_WORKER_SECRET
  */
 function workerAuth(req, res, next) {
@@ -89,13 +102,15 @@ function workerAuth(req, res, next) {
   }
 
   // Check custom header or Bearer header
-  const headerSecret =
+  const rawHeaderSecret =
     req.headers["x-worker-secret"] ||
     (req.headers.authorization && req.headers.authorization.startsWith("Bearer ")
       ? req.headers.authorization.split(" ")[1]
       : null);
 
-  if (!headerSecret || headerSecret !== configuredSecret) {
+  const headerSecret = Array.isArray(rawHeaderSecret) ? rawHeaderSecret[0] : rawHeaderSecret;
+
+  if (!headerSecret || !secretsMatch(headerSecret, configuredSecret)) {
     return res.status(401).json({
       success: false,
       error: "Unauthorized: Invalid or missing worker authentication secret",
