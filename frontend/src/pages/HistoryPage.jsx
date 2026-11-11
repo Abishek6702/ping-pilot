@@ -2,7 +2,9 @@ import React, { useEffect, useState, useCallback } from "react";
 import Card from "../components/common/Card";
 import StatusBadge from "../components/common/StatusBadge";
 import EmptyState from "../components/common/EmptyState";
-import { TableSkeleton } from "../components/common/Skeleton";
+import ViewModeToggle from "../components/common/ViewModeToggle";
+import { GridSkeleton, TableSkeleton } from "../components/common/Skeleton";
+import useViewMode from "../hooks/useViewMode";
 import {
   History as HistoryIcon,
   RefreshCw,
@@ -36,6 +38,7 @@ export default function HistoryPage() {
   const [selectedStatus, setSelectedStatus] = useState("ALL");
   const [timeRange, setTimeRange] = useState("24h");
   const [page, setPage] = useState(1);
+  const [viewMode, setViewMode] = useViewMode();
 
   // Direct fetch for monitor list (for dropdown filter)
   const loadMonitors = useCallback(async () => {
@@ -102,6 +105,60 @@ export default function HistoryPage() {
     setPage(1);
   };
 
+  const renderServiceButton = (log, className = "") => (
+    <button
+      type="button"
+      onClick={() => {
+        if (log.monitorId?._id) {
+          setSelectedMonitor(log.monitorId._id);
+          setPage(1);
+        }
+      }}
+      className={`hover:text-[#0E7A88] dark:hover:text-[#38b2ac] hover:underline cursor-pointer text-left font-semibold ${className}`}
+      title="Click to filter by this service"
+    >
+      {log.monitorId?.name || "Deleted Service"}
+    </button>
+  );
+
+  const renderOutcome = (log) =>
+    log.errorMessage ? (
+      <span className="text-rose-500 break-words">{log.errorMessage}</span>
+    ) : (
+      <span className="text-emerald-500 flex items-center gap-1 font-medium">
+        <CheckCircle2 className="w-3.5 h-3.5 shrink-0" /> Success
+      </span>
+    );
+
+  const paginationControls =
+    pagination.pages > 1 ? (
+      <div className="px-4 sm:px-6 py-3 border-t border-slate-100 dark:border-slate-800 flex flex-wrap items-center justify-between gap-2 text-xs text-slate-500">
+        <div>
+          Showing page <span className="font-medium text-slate-900 dark:text-white">{page}</span> of{" "}
+          <span className="font-medium text-slate-900 dark:text-white">{pagination.pages}</span> (
+          {pagination.total} total logs)
+        </div>
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={() => setPage((p) => Math.max(1, p - 1))}
+            disabled={page <= 1}
+            className="p-1.5 rounded-lg border border-slate-200 dark:border-slate-800 hover:bg-slate-100 dark:hover:bg-slate-800 disabled:opacity-40 cursor-pointer"
+          >
+            <ChevronLeft className="w-4 h-4" />
+          </button>
+          <button
+            type="button"
+            onClick={() => setPage((p) => Math.min(pagination.pages, p + 1))}
+            disabled={page >= pagination.pages}
+            className="p-1.5 rounded-lg border border-slate-200 dark:border-slate-800 hover:bg-slate-100 dark:hover:bg-slate-800 disabled:opacity-40 cursor-pointer"
+          >
+            <ChevronRight className="w-4 h-4" />
+          </button>
+        </div>
+      </div>
+    ) : null;
+
   return (
     <div className="space-y-5">
       {/* Page Header */}
@@ -120,14 +177,17 @@ export default function HistoryPage() {
           </p>
         </div>
 
-        <button
-          type="button"
-          onClick={loadHistory}
-          className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-slate-700 dark:text-slate-200 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-700/60 rounded-lg transition-colors cursor-pointer self-start sm:self-auto shadow-xs"
-        >
-          <RefreshCw className={`w-3.5 h-3.5 ${loading ? "animate-spin text-[#0E7A88]" : ""}`} />
-          <span>Refresh</span>
-        </button>
+        <div className="flex items-center gap-2 self-start sm:self-auto">
+          <ViewModeToggle viewMode={viewMode} onChange={setViewMode} />
+          <button
+            type="button"
+            onClick={loadHistory}
+            className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-slate-700 dark:text-slate-200 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-700/60 rounded-lg transition-colors cursor-pointer shadow-xs"
+          >
+            <RefreshCw className={`w-3.5 h-3.5 ${loading ? "animate-spin text-[#0E7A88]" : ""}`} />
+            <span>Refresh</span>
+          </button>
+        </div>
       </div>
 
       {/* Filter Control Bar */}
@@ -240,11 +300,17 @@ export default function HistoryPage() {
         </div>
       </Card>
 
-      {/* History Table */}
-      <Card className="overflow-hidden">
-        {loading && results.length === 0 ? (
-          <TableSkeleton rows={8} cols={6} />
-        ) : results.length === 0 ? (
+      {/* History List / Table */}
+      {loading && results.length === 0 ? (
+        viewMode === "grid" ? (
+          <GridSkeleton count={6} />
+        ) : (
+          <Card className="overflow-hidden p-4">
+            <TableSkeleton rows={8} cols={6} />
+          </Card>
+        )
+      ) : results.length === 0 ? (
+        <Card className="overflow-hidden">
           <EmptyState
             icon={HistoryIcon}
             title={selectedMonitor ? "No logs for this service" : "No history logs found"}
@@ -254,7 +320,55 @@ export default function HistoryPage() {
                 : "No check results matching the specified filters were found in the last 30 days."
             }
           />
-        ) : (
+        </Card>
+      ) : viewMode === "grid" ? (
+        <div className="space-y-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-4">
+            {results.map((log) => (
+              <Card key={log._id} hover className="p-4 flex flex-col justify-between gap-3 text-xs">
+                <div className="flex items-start justify-between gap-2">
+                  <div className="min-w-0 flex-1">
+                    {renderServiceButton(
+                      log,
+                      "text-sm text-slate-900 dark:text-white truncate block max-w-full"
+                    )}
+                    <p className="text-[11px] text-slate-400 mt-0.5">
+                      {new Date(log.checkedAt).toLocaleString()}
+                    </p>
+                  </div>
+                  <StatusBadge status={log.status} size="sm" />
+                </div>
+
+                <div className="grid grid-cols-2 gap-2.5 p-3 rounded-lg bg-slate-50/80 dark:bg-slate-800/40 border border-slate-100 dark:border-slate-800/60">
+                  <div>
+                    <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-400 mb-0.5">
+                      HTTP Status
+                    </p>
+                    <p className="font-mono font-medium text-slate-700 dark:text-slate-200">
+                      {log.statusCode ? `HTTP ${log.statusCode}` : "—"}
+                    </p>
+                  </div>
+                  <div>
+                    <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-400 mb-0.5">
+                      Latency
+                    </p>
+                    <p className="font-mono font-medium text-slate-700 dark:text-slate-200">
+                      {log.responseTime} ms
+                    </p>
+                  </div>
+                </div>
+
+                <div className="pt-2 border-t border-slate-100 dark:border-slate-800 text-[11px]">
+                  {renderOutcome(log)}
+                </div>
+              </Card>
+            ))}
+          </div>
+
+          {paginationControls && <Card className="overflow-hidden">{paginationControls}</Card>}
+        </div>
+      ) : (
+        <Card className="overflow-hidden">
           <div className="overflow-x-auto">
             <table className="w-full text-left text-xs border-collapse">
               <thead>
@@ -271,19 +385,7 @@ export default function HistoryPage() {
                 {results.map((log) => (
                   <tr key={log._id} className="hover:bg-slate-50/50 dark:hover:bg-slate-800/20">
                     <td className="py-3 px-4 font-medium text-slate-900 dark:text-white">
-                      <button
-                        type="button"
-                        onClick={() => {
-                          if (log.monitorId?._id) {
-                            setSelectedMonitor(log.monitorId._id);
-                            setPage(1);
-                          }
-                        }}
-                        className="hover:text-[#0E7A88] dark:hover:text-[#38b2ac] hover:underline cursor-pointer text-left font-semibold"
-                        title="Click to filter by this service"
-                      >
-                        {log.monitorId?.name || "Deleted Service"}
-                      </button>
+                      {renderServiceButton(log)}
                     </td>
                     <td className="py-3 px-4">
                       <StatusBadge status={log.status} size="sm" />
@@ -297,51 +399,16 @@ export default function HistoryPage() {
                     <td className="py-3 px-4 text-slate-500 dark:text-slate-400">
                       {new Date(log.checkedAt).toLocaleString()}
                     </td>
-                    <td className="py-3 px-4 max-w-xs truncate">
-                      {log.errorMessage ? (
-                        <span className="text-rose-500">{log.errorMessage}</span>
-                      ) : (
-                        <span className="text-emerald-500 flex items-center gap-1 font-medium">
-                          <CheckCircle2 className="w-3.5 h-3.5" /> Success
-                        </span>
-                      )}
-                    </td>
+                    <td className="py-3 px-4 max-w-xs truncate">{renderOutcome(log)}</td>
                   </tr>
                 ))}
               </tbody>
             </table>
           </div>
-        )}
 
-        {/* Pagination footer */}
-        {pagination.pages > 1 && (
-          <div className="px-6 py-3 border-t border-slate-100 dark:border-slate-800 flex items-center justify-between text-xs text-slate-500">
-            <div>
-              Showing page <span className="font-medium text-slate-900 dark:text-white">{page}</span>{" "}
-              of <span className="font-medium text-slate-900 dark:text-white">{pagination.pages}</span>{" "}
-              ({pagination.total} total logs)
-            </div>
-            <div className="flex items-center gap-2">
-              <button
-                type="button"
-                onClick={() => setPage((p) => Math.max(1, p - 1))}
-                disabled={page <= 1}
-                className="p-1.5 rounded-lg border border-slate-200 dark:border-slate-800 hover:bg-slate-100 dark:hover:bg-slate-800 disabled:opacity-40 cursor-pointer"
-              >
-                <ChevronLeft className="w-4 h-4" />
-              </button>
-              <button
-                type="button"
-                onClick={() => setPage((p) => Math.min(pagination.pages, p + 1))}
-                disabled={page >= pagination.pages}
-                className="p-1.5 rounded-lg border border-slate-200 dark:border-slate-800 hover:bg-slate-100 dark:hover:bg-slate-800 disabled:opacity-40 cursor-pointer"
-              >
-                <ChevronRight className="w-4 h-4" />
-              </button>
-            </div>
-          </div>
-        )}
-      </Card>
+          {paginationControls}
+        </Card>
+      )}
     </div>
   );
 }

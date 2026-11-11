@@ -5,7 +5,9 @@ import MonitorTable from "../components/monitors/MonitorTable";
 import MonitorFormModal from "../components/monitors/MonitorFormModal";
 import ConfirmDialog from "../components/common/ConfirmDialog";
 import EmptyState from "../components/common/EmptyState";
-import { TableSkeleton } from "../components/common/Skeleton";
+import ViewModeToggle from "../components/common/ViewModeToggle";
+import { GridSkeleton, TableSkeleton } from "../components/common/Skeleton";
+import useViewMode from "../hooks/useViewMode";
 import { Plus, Search, RefreshCw, Sparkles } from "lucide-react";
 import toast from "react-hot-toast";
 
@@ -30,6 +32,7 @@ export default function MonitorsPage() {
   const [editingMonitor, setEditingMonitor] = useState(null);
   const [deletingMonitor, setDeletingMonitor] = useState(null);
   const [modalLoading, setModalLoading] = useState(false);
+  const [viewMode, setViewMode] = useViewMode();
 
   // Direct fetch inside MonitorsPage
   const loadMonitors = useCallback(async () => {
@@ -218,37 +221,45 @@ export default function MonitorsPage() {
             ))}
           </div>
 
-          {/* Search Input */}
-          <form onSubmit={handleSearchSubmit} className="flex items-center gap-2 w-full sm:w-auto">
-            <div className="relative flex-1 sm:w-64">
-              <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
-              <input
-                type="text"
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                placeholder="Search by name or URL..."
-                className="w-full pl-9 pr-3 py-1.5 text-xs bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#0E7A88] text-slate-900 dark:text-white"
-              />
-            </div>
-            <button
-              type="button"
-              onClick={loadMonitors}
-              title="Refresh monitors"
-              className="p-2 text-slate-600 dark:text-slate-400 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-700 rounded-lg transition-colors cursor-pointer shadow-2xs"
-            >
-              <RefreshCw className={`w-3.5 h-3.5 ${loading ? "animate-spin text-[#0E7A88]" : ""}`} />
-            </button>
-          </form>
+          {/* Search Input & View Toggle */}
+          <div className="flex flex-wrap items-center gap-2 w-full sm:w-auto justify-between sm:justify-end">
+            <form onSubmit={handleSearchSubmit} className="flex items-center gap-2 flex-1 sm:flex-initial">
+              <div className="relative flex-1 sm:w-64">
+                <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                <input
+                  type="text"
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  placeholder="Search by name or URL..."
+                  className="w-full pl-9 pr-3 py-1.5 text-xs bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#0E7A88] text-slate-900 dark:text-white"
+                />
+              </div>
+              <button
+                type="button"
+                onClick={loadMonitors}
+                title="Refresh monitors"
+                className="p-2 text-slate-600 dark:text-slate-400 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-700 rounded-lg transition-colors cursor-pointer shadow-2xs"
+              >
+                <RefreshCw className={`w-3.5 h-3.5 ${loading ? "animate-spin text-[#0E7A88]" : ""}`} />
+              </button>
+            </form>
+
+            <ViewModeToggle viewMode={viewMode} onChange={setViewMode} />
+          </div>
         </div>
       </Card>
 
-      {/* Monitor List Table */}
-      <Card className="overflow-hidden">
-        {loading && monitors.length === 0 ? (
-          <div className="p-4">
+      {/* Monitor List */}
+      {loading && monitors.length === 0 ? (
+        viewMode === "grid" ? (
+          <GridSkeleton count={6} />
+        ) : (
+          <Card className="overflow-hidden p-4">
             <TableSkeleton rows={5} cols={7} />
-          </div>
-        ) : monitors.length === 0 ? (
+          </Card>
+        )
+      ) : monitors.length === 0 ? (
+        <Card className="overflow-hidden">
           <EmptyState
             title="No monitors match your filter"
             description={
@@ -262,9 +273,25 @@ export default function MonitorsPage() {
               setIsModalOpen(true);
             }}
           />
-        ) : (
+        </Card>
+      ) : viewMode === "grid" ? (
+        <MonitorTable
+          monitors={monitors}
+          viewMode="grid"
+          onPing={handlePing}
+          onToggle={handleToggle}
+          onEdit={(m) => {
+            setEditingMonitor(m);
+            setIsModalOpen(true);
+          }}
+          onDelete={(m) => setDeletingMonitor(m)}
+          pingingId={pingingId}
+        />
+      ) : (
+        <Card className="overflow-hidden">
           <MonitorTable
             monitors={monitors}
+            viewMode="table"
             onPing={handlePing}
             onToggle={handleToggle}
             onEdit={(m) => {
@@ -274,8 +301,8 @@ export default function MonitorsPage() {
             onDelete={(m) => setDeletingMonitor(m)}
             pingingId={pingingId}
           />
-        )}
-      </Card>
+        </Card>
+      )}
 
       {/* Add / Edit Monitor Modal */}
       <MonitorFormModal

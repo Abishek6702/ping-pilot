@@ -35,3 +35,26 @@ export function TableSkeleton({ rows = 5, cols = 6 }) {
   );
 }
 
+export function GridSkeleton({ count = 6 }) {
+  return (
+    <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-4">
+      {Array.from({ length: count }).map((_, i) => (
+        <div
+          key={i}
+          className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-4 space-y-3"
+        >
+          <div className="flex items-center justify-between gap-2">
+            <Skeleton className="h-4 w-32" />
+            <Skeleton className="h-5 w-14 rounded-full" />
+          </div>
+          <Skeleton className="h-3 w-48" />
+          <div className="grid grid-cols-2 gap-2 pt-1">
+            <Skeleton className="h-10 w-full rounded-lg" />
+            <Skeleton className="h-10 w-full rounded-lg" />
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+

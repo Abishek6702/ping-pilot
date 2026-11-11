@@ -6,7 +6,9 @@ import ResponseTimeChart from "../components/charts/ResponseTimeChart";
 import UptimeChart from "../components/charts/UptimeChart";
 import MonitorFormModal from "../components/monitors/MonitorFormModal";
 import ConfirmDialog from "../components/common/ConfirmDialog";
+import ViewModeToggle from "../components/common/ViewModeToggle";
 import { CardSkeleton } from "../components/common/Skeleton";
+import useViewMode from "../hooks/useViewMode";
 import {
   ExternalLink,
   RefreshCw,
@@ -42,6 +44,7 @@ export default function MonitorDetailsPage() {
   const [isEditOpen, setIsEditOpen] = useState(false);
   const [isDeleteOpen, setIsDeleteOpen] = useState(false);
   const [modalLoading, setModalLoading] = useState(false);
+  const [logsViewMode, setLogsViewMode] = useViewMode();
 
   // Direct fetch inside MonitorDetailsPage
   const loadData = useCallback(async () => {
@@ -210,6 +213,15 @@ export default function MonitorDetailsPage() {
 
   const chartData = monitorStats?.chartData || [];
   const recentPings = monitorStats?.recentPings || [];
+
+  const renderPingOutcome = (p) =>
+    p.errorMessage ? (
+      <span className="text-rose-500 break-words">{p.errorMessage}</span>
+    ) : (
+      <span className="text-emerald-500 flex items-center gap-1 font-medium">
+        <CheckCircle2 className="w-3.5 h-3.5 shrink-0" /> OK
+      </span>
+    );
 
   return (
     <div className="space-y-6">
@@ -450,18 +462,52 @@ export default function MonitorDetailsPage() {
 
       {/* Recent Ping Log History */}
       <Card className="overflow-hidden">
-        <div className="px-6 py-4 border-b border-slate-100 dark:border-slate-800">
-          <h3 className="text-sm font-semibold text-slate-900 dark:text-white">
-            Recent Ping Logs
-          </h3>
-          <p className="text-xs text-slate-400 mt-0.5">
-            Individual probe checks executed for this endpoint.
-          </p>
+        <div className="px-4 sm:px-6 py-4 border-b border-slate-100 dark:border-slate-800 flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <h3 className="text-sm font-semibold text-slate-900 dark:text-white">
+              Recent Ping Logs
+            </h3>
+            <p className="text-xs text-slate-400 mt-0.5">
+              Individual probe checks executed for this endpoint.
+            </p>
+          </div>
+          <ViewModeToggle viewMode={logsViewMode} onChange={setLogsViewMode} />
         </div>
 
         {recentPings.length === 0 ? (
           <div className="p-8 text-center text-xs text-slate-400">
             No check logs recorded yet for this endpoint.
+          </div>
+        ) : logsViewMode === "grid" ? (
+          <div className="p-4 bg-slate-50/50 dark:bg-slate-950/30 grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-4">
+            {recentPings.map((p) => (
+              <Card key={p._id} hover className="p-4 flex flex-col justify-between gap-3 text-xs">
+                <div className="flex items-start justify-between gap-2">
+                  <div>
+                    <p className="font-mono font-semibold text-slate-900 dark:text-white">
+                      {p.statusCode ? `HTTP ${p.statusCode}` : "No HTTP Status"}
+                    </p>
+                    <p className="text-[11px] text-slate-400 mt-0.5">
+                      {new Date(p.checkedAt).toLocaleString()}
+                    </p>
+                  </div>
+                  <StatusBadge status={p.status} size="sm" />
+                </div>
+
+                <div className="flex items-center justify-between p-2.5 rounded-lg bg-slate-50/80 dark:bg-slate-800/40 border border-slate-100 dark:border-slate-800/60">
+                  <span className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">
+                    Response Time
+                  </span>
+                  <span className="font-mono font-medium text-slate-700 dark:text-slate-200">
+                    {p.responseTime} ms
+                  </span>
+                </div>
+
+                <div className="pt-2 border-t border-slate-100 dark:border-slate-800 text-[11px]">
+                  {renderPingOutcome(p)}
+                </div>
+              </Card>
+            ))}
           </div>
         ) : (
           <div className="overflow-x-auto">
@@ -491,13 +537,7 @@ export default function MonitorDetailsPage() {
                       {new Date(p.checkedAt).toLocaleString()}
                     </td>
                     <td className="py-3 px-4 text-slate-500 dark:text-slate-400 truncate max-w-xs">
-                      {p.errorMessage ? (
-                        <span className="text-rose-500">{p.errorMessage}</span>
-                      ) : (
-                        <span className="text-emerald-500 flex items-center gap-1">
-                          <CheckCircle2 className="w-3.5 h-3.5" /> OK
-                        </span>
-                      )}
+                      {renderPingOutcome(p)}
                     </td>
                   </tr>
                 ))}

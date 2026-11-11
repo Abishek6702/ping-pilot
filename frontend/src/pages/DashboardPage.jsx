@@ -1,5 +1,6 @@
 import React, { useEffect, useState, useCallback } from "react";
 import { useSelector } from "react-redux";
+import { Link } from "react-router-dom";
 import Card from "../components/common/Card";
 import StatusBadge from "../components/common/StatusBadge";
 import ResponseTimeChart from "../components/charts/ResponseTimeChart";
@@ -8,7 +9,9 @@ import MonitorTable from "../components/monitors/MonitorTable";
 import MonitorFormModal from "../components/monitors/MonitorFormModal";
 import ConfirmDialog from "../components/common/ConfirmDialog";
 import EmptyState from "../components/common/EmptyState";
-import { CardSkeleton, TableSkeleton } from "../components/common/Skeleton";
+import ViewModeToggle from "../components/common/ViewModeToggle";
+import { CardSkeleton, GridSkeleton, TableSkeleton } from "../components/common/Skeleton";
+import useViewMode from "../hooks/useViewMode";
 import {
   Activity,
   CheckCircle2,
@@ -18,6 +21,8 @@ import {
   TrendingUp,
   Plus,
   RefreshCw,
+  Clock,
+  ArrowUpRight,
 } from "lucide-react";
 import toast from "react-hot-toast";
 
@@ -43,6 +48,8 @@ export default function DashboardPage() {
   const [editingMonitor, setEditingMonitor] = useState(null);
   const [deletingMonitor, setDeletingMonitor] = useState(null);
   const [modalLoading, setModalLoading] = useState(false);
+  const [viewMode, setViewMode] = useViewMode();
+  const [activityViewMode, setActivityViewMode] = useViewMode();
 
   // Direct normal fetch for dashboard metrics inside this file
   const loadData = useCallback(async (range = timeRange) => {
@@ -177,6 +184,47 @@ export default function DashboardPage() {
   const monitors = dashboardData?.monitors || [];
   const charts = dashboardData?.charts || [];
   const recentActivity = dashboardData?.recentActivity || [];
+
+  const renderActivityService = (p) => (
+    <div className="min-w-0">
+      {p.monitorId?._id ? (
+        <Link
+          to={`/monitors/${p.monitorId._id}`}
+          className="font-semibold text-slate-900 dark:text-white hover:text-[#0E7A88] dark:hover:text-[#38b2ac] inline-flex items-center gap-1 transition-colors max-w-full"
+        >
+          <span className="truncate">{p.monitorId.name || "Service"}</span>
+          <ArrowUpRight className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+        </Link>
+      ) : (
+        <span className="font-semibold text-slate-900 dark:text-white">
+          {p.monitorId?.name || "Deleted Service"}
+        </span>
+      )}
+      {p.monitorId?.url && (
+        <p className="text-[11px] font-mono text-slate-400 truncate max-w-xs mt-0.5">
+          {p.monitorId.url}
+        </p>
+      )}
+    </div>
+  );
+
+  const renderActivityOutcome = (p) =>
+    p.errorMessage ? (
+      <span className="text-rose-500 break-words">{p.errorMessage}</span>
+    ) : (
+      <span className="text-emerald-500 flex items-center gap-1 font-medium">
+        <CheckCircle2 className="w-3.5 h-3.5 shrink-0" /> Success
+      </span>
+    );
+
+  const formatCheckedTime = (checkedAt) =>
+    new Date(checkedAt).toLocaleString([], {
+      month: "short",
+      day: "numeric",
+      hour: "2-digit",
+      minute: "2-digit",
+      second: "2-digit",
+    });
 
   return (
     <div className="space-y-6">
@@ -358,9 +406,9 @@ export default function DashboardPage() {
         </Card>
       </div>
 
-      {/* Monitors Overview Table */}
+      {/* Monitors Overview Table / Grid */}
       <Card className="overflow-hidden">
-        <div className="p-4 sm:p-5 border-b border-slate-100 dark:border-slate-800 flex items-center justify-between">
+        <div className="p-4 sm:p-5 border-b border-slate-100 dark:border-slate-800 flex flex-wrap items-center justify-between gap-3">
           <div>
             <h3 className="text-sm font-semibold text-slate-900 dark:text-white">
               Monitored Services
@@ -369,14 +417,17 @@ export default function DashboardPage() {
               Current state, latency, and real-time trigger actions.
             </p>
           </div>
-          <span className="text-xs text-slate-400 font-medium">
-            {monitors.length} active service{monitors.length === 1 ? "" : "s"}
-          </span>
+          <div className="flex items-center gap-3">
+            <span className="text-xs text-slate-400 font-medium">
+              {monitors.length} active service{monitors.length === 1 ? "" : "s"}
+            </span>
+            <ViewModeToggle viewMode={viewMode} onChange={setViewMode} />
+          </div>
         </div>
 
         {loading && !dashboardData ? (
           <div className="p-4">
-            <TableSkeleton rows={5} cols={7} />
+            {viewMode === "grid" ? <GridSkeleton count={6} /> : <TableSkeleton rows={5} cols={7} />}
           </div>
         ) : monitors.length === 0 ? (
           <EmptyState
@@ -391,6 +442,8 @@ export default function DashboardPage() {
         ) : (
           <MonitorTable
             monitors={monitors}
+            viewMode={viewMode}
+            gridClassName="p-4 bg-slate-50/50 dark:bg-slate-950/30"
             onPing={handlePing}
             onToggle={handleToggle}
             onEdit={(m) => {
@@ -403,32 +456,110 @@ export default function DashboardPage() {
         )}
       </Card>
 
-      {/* Recent Activity List */}
+      {/* Recent Ping Activity */}
       {recentActivity.length > 0 && (
-        <Card className="p-4 sm:p-5">
-          <h3 className="text-sm font-semibold text-slate-900 dark:text-white mb-3">
-            Recent Ping Activity
-          </h3>
-          <div className="divide-y divide-slate-100 dark:divide-slate-800 text-xs">
-            {recentActivity.map((p) => (
-              <div key={p._id} className="py-2.5 flex items-center justify-between">
-                <div className="flex items-center gap-3">
-                  <StatusBadge status={p.status} />
-                  <div>
-                    <span className="font-medium text-slate-800 dark:text-slate-200">
-                      {p.monitorId?.name || "Service"}
-                    </span>
-                    <span className="text-slate-400 ml-2">
-                      {p.responseTime}ms • HTTP {p.statusCode || "N/A"}
+        <Card className="overflow-hidden">
+          <div className="p-4 sm:p-5 border-b border-slate-100 dark:border-slate-800 flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <h3 className="text-sm font-semibold text-slate-900 dark:text-white">
+                Recent Ping Activity
+              </h3>
+              <p className="text-xs text-slate-400 mt-0.5">
+                Latest probe checks executed across your endpoints.
+              </p>
+            </div>
+            <div className="flex flex-wrap items-center gap-3">
+              <Link
+                to="/history"
+                className="text-xs font-medium text-[#0E7A88] dark:text-[#38b2ac] hover:underline inline-flex items-center gap-1"
+              >
+                <span>View all history</span>
+                <ArrowUpRight className="w-3.5 h-3.5" />
+              </Link>
+              <ViewModeToggle viewMode={activityViewMode} onChange={setActivityViewMode} />
+            </div>
+          </div>
+
+          {activityViewMode === "grid" ? (
+            <div className="p-4 bg-slate-50/50 dark:bg-slate-950/30 grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-4">
+              {recentActivity.map((p) => (
+                <Card key={p._id} hover className="p-4 flex flex-col justify-between gap-3 text-xs">
+                  <div className="flex items-start justify-between gap-2">
+                    {renderActivityService(p)}
+                    <StatusBadge status={p.status} size="sm" />
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-2.5 p-3 rounded-lg bg-slate-50/80 dark:bg-slate-800/40 border border-slate-100 dark:border-slate-800/60">
+                    <div>
+                      <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-400 mb-0.5">
+                        HTTP Status
+                      </p>
+                      <p className="font-mono font-medium text-slate-700 dark:text-slate-200">
+                        {p.statusCode ? `HTTP ${p.statusCode}` : "—"}
+                      </p>
+                    </div>
+                    <div>
+                      <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-400 mb-0.5">
+                        Latency
+                      </p>
+                      <p className="font-mono font-medium text-slate-700 dark:text-slate-200">
+                        {p.responseTime} ms
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="pt-2 border-t border-slate-100 dark:border-slate-800 flex items-center justify-between gap-2 text-[11px]">
+                    <div className="min-w-0 truncate">{renderActivityOutcome(p)}</div>
+                    <span className="text-slate-400 inline-flex items-center gap-1 shrink-0">
+                      <Clock className="w-3 h-3" />
+                      {formatCheckedTime(p.checkedAt)}
                     </span>
                   </div>
-                </div>
-                <span className="text-slate-400">
-                  {new Date(p.checkedAt).toLocaleTimeString()}
-                </span>
-              </div>
-            ))}
-          </div>
+                </Card>
+              ))}
+            </div>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full text-left text-xs border-collapse">
+                <thead>
+                  <tr className="border-b border-slate-200 dark:border-slate-800 text-[11px] font-semibold text-slate-400 dark:text-slate-500 uppercase tracking-wider bg-slate-50/50 dark:bg-slate-800/30">
+                    <th className="py-3 px-4">Service</th>
+                    <th className="py-3 px-4">Status</th>
+                    <th className="py-3 px-4">HTTP Status</th>
+                    <th className="py-3 px-4">Response Time</th>
+                    <th className="py-3 px-4">Checked At</th>
+                    <th className="py-3 px-4">Outcome</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100 dark:divide-slate-800/60">
+                  {recentActivity.map((p) => (
+                    <tr
+                      key={p._id}
+                      className="hover:bg-slate-50/60 dark:hover:bg-slate-800/30 transition-colors"
+                    >
+                      <td className="py-3 px-4">{renderActivityService(p)}</td>
+                      <td className="py-3 px-4">
+                        <StatusBadge status={p.status} size="sm" />
+                      </td>
+                      <td className="py-3 px-4 font-mono text-slate-700 dark:text-slate-300">
+                        {p.statusCode ? `HTTP ${p.statusCode}` : "—"}
+                      </td>
+                      <td className="py-3 px-4 font-mono text-slate-700 dark:text-slate-300">
+                        {p.responseTime} ms
+                      </td>
+                      <td className="py-3 px-4 text-slate-500 dark:text-slate-400 whitespace-nowrap">
+                        <span className="inline-flex items-center gap-1.5">
+                          <Clock className="w-3 h-3 text-slate-400" />
+                          <span>{formatCheckedTime(p.checkedAt)}</span>
+                        </span>
+                      </td>
+                      <td className="py-3 px-4 max-w-xs truncate">{renderActivityOutcome(p)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
         </Card>
       )}
 
