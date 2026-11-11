@@ -11,6 +11,7 @@ import MonitorDetailsPage from "./pages/MonitorDetailsPage";
 import HistoryPage from "./pages/HistoryPage";
 import SettingsPage from "./pages/SettingsPage";
 import AdminUsersPage from "./pages/AdminUsersPage";
+import AdminAuditLogsPage from "./pages/AdminAuditLogsPage";
 import ApiTesterPage from "./pages/ApiTesterPage";
 import NotFoundPage from "./pages/NotFoundPage";
 import { Toaster } from "react-hot-toast";
@@ -145,6 +146,14 @@ export default function App() {
             element={
               <AdminRoute>
                 <AdminUsersPage />
+              </AdminRoute>
+            }
+          />
+          <Route
+            path="/admin/audit-logs"
+            element={
+              <AdminRoute>
+                <AdminAuditLogsPage />
               </AdminRoute>
             }
           />

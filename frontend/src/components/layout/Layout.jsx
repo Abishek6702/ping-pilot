@@ -18,6 +18,7 @@ export default function Layout({ children }) {
     if (pathname.startsWith("/history")) return "Monitoring History";
     if (pathname.startsWith("/tester")) return "API Tester";
     if (pathname.startsWith("/settings")) return "Settings";
+    if (pathname.startsWith("/admin/audit-logs")) return "Audit Logs";
     if (pathname.startsWith("/admin")) return "Platform Administration";
     return "PingPilot";
   };

@@ -117,6 +117,7 @@ function workerAuth(req, res, next) {
     });
   }
 
+  req.isWorker = true;
   next();
 }
 

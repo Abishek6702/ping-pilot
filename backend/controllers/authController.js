@@ -1,6 +1,12 @@
 const crypto = require("crypto");
+const jwt = require("jsonwebtoken");
 const User = require("../models/User");
-const { generateToken, setTokenCookie, clearTokenCookie } = require("../utils/generateToken");
+const {
+  generateToken,
+  setTokenCookie,
+  clearTokenCookie,
+  COOKIE_NAME,
+} = require("../utils/generateToken");
 const { verifyGoogleIdToken } = require("../utils/googleAuth");
 const sendMail = require("../utils/sendMail");
 const renderTemplate = require("../utils/renderTemplate");
@@ -65,6 +71,7 @@ async function login(req, res, next) {
 
     const token = generateToken({ id: user._id, role: user.role, email: user.email });
     setTokenCookie(res, token);
+    res.locals.auditUser = { _id: user._id, name: user.name, role: user.role };
 
     return res.status(200).json({
       success: true,
@@ -140,6 +147,7 @@ async function register(req, res, next) {
 
     const token = generateToken({ id: user._id, role: user.role, email: user.email });
     setTokenCookie(res, token);
+    res.locals.auditUser = { _id: user._id, name: user.name, role: user.role };
 
     return res.status(201).json({
       success: true,
@@ -225,6 +233,7 @@ async function googleLogin(req, res, next) {
 
     const token = generateToken({ id: user._id, role: user.role, email: user.email });
     setTokenCookie(res, token);
+    res.locals.auditUser = { _id: user._id, name: user.name, role: user.role };
 
     return res.status(200).json({
       success: true,
@@ -252,6 +261,23 @@ async function googleLogin(req, res, next) {
  * POST /api/auth/logout
  */
 function logout(req, res) {
+  try {
+    let token = req.cookies?.[COOKIE_NAME];
+    if (!token && req.headers.authorization?.startsWith("Bearer ")) {
+      token = req.headers.authorization.split(" ")[1];
+    }
+    if (token && process.env.JWT_SECRET) {
+      const decoded = jwt.verify(token, process.env.JWT_SECRET);
+      res.locals.auditUser = {
+        _id: decoded.id || decoded._id || null,
+        name: decoded.name || decoded.email || "User",
+        role: decoded.role || "user",
+      };
+    }
+  } catch (_err) {
+    // Ignore invalid/expired token during logout
+  }
+
   clearTokenCookie(res);
   return res.status(200).json({
     success: true,
@@ -400,6 +426,7 @@ async function resetPassword(req, res, next) {
     }
 
     await user.save();
+    res.locals.auditUser = { _id: user._id, name: user.name, role: user.role };
 
     return res.status(200).json({
       success: true,

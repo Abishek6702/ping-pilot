@@ -9,6 +9,7 @@ const cookieParser = require("cookie-parser");
 
 const { apiLimiter } = require("./middleware/rateLimiter");
 const { notFound, errorHandler } = require("./middleware/errorHandler");
+const { auditLogger } = require("./middleware/auditLogger");
 const { logEvent } = require("./utils/logger");
 
 const healthRoutes = require("./routes/healthRoutes");
@@ -22,6 +23,7 @@ const adminRoutes = require("./routes/adminRoutes");
 const testerRoutes = require("./routes/testerRoutes");
 
 const app = express();
+app.set("trust proxy", 1);
 
 // 1. Set Security HTTP Headers
 app.use(
@@ -110,6 +112,9 @@ if (process.env.NODE_ENV !== "test") {
     next();
   });
 }
+
+// 8. Request Audit Logging
+app.use(auditLogger);
 
 // --- ROUTES ---
 app.use("/api/health", healthRoutes);

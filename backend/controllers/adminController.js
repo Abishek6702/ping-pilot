@@ -1,7 +1,12 @@
 const User = require("../models/User");
 const Monitor = require("../models/Monitor");
 const PingResult = require("../models/PingResult");
+const AuditLog = require("../models/AuditLog");
 const { getAdminEmails } = require("../services/bootstrapAdmin");
+
+function escapeRegex(value) {
+  return String(value).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
 
 /**
  * Get system-wide administrative overview
@@ -162,10 +167,68 @@ async function getAdminMonitors(req, res, next) {
   }
 }
 
+/**
+ * Get paginated and filterable platform audit logs
+ * GET /api/admin/audit-logs
+ */
+async function getAdminAuditLogs(req, res, next) {
+  try {
+    const page = Math.max(1, parseInt(req.query.page, 10) || 1);
+    const limit = Math.min(100, Math.max(1, parseInt(req.query.limit, 10) || 30));
+    const { method, success, role, search } = req.query;
+
+    const query = {};
+
+    if (method && method !== "ALL") {
+      query.method = String(method).toUpperCase().trim();
+    }
+
+    if (success === "true" || success === "false") {
+      query.success = success === "true";
+    }
+
+    if (role && role !== "ALL") {
+      query.role = String(role).trim();
+    }
+
+    if (search && String(search).trim()) {
+      const regex = new RegExp(escapeRegex(String(search).trim()), "i");
+      query.$or = [
+        { name: regex },
+        { action: regex },
+        { endpoint: regex },
+        { ipAddress: regex },
+      ];
+    }
+
+    const [logs, total] = await Promise.all([
+      AuditLog.find(query)
+        .sort({ createdAt: -1 })
+        .skip((page - 1) * limit)
+        .limit(limit),
+      AuditLog.countDocuments(query),
+    ]);
+
+    return res.status(200).json({
+      success: true,
+      logs,
+      pagination: {
+        page,
+        limit,
+        total,
+        pages: Math.max(1, Math.ceil(total / limit)),
+      },
+    });
+  } catch (error) {
+    next(error);
+  }
+}
+
 module.exports = {
   getAdminOverview,
   getAdminUsers,
   toggleUserStatus,
   getAdminMonitors,
+  getAdminAuditLogs,
 };
 

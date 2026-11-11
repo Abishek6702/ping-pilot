@@ -4,6 +4,7 @@ const {
   getAdminUsers,
   toggleUserStatus,
   getAdminMonitors,
+  getAdminAuditLogs,
 } = require("../controllers/adminController");
 const { protect, adminOnly } = require("../middleware/auth");
 
@@ -16,6 +17,7 @@ router.get("/overview", getAdminOverview);
 router.get("/users", getAdminUsers);
 router.patch("/users/:id/toggle", toggleUserStatus);
 router.get("/monitors", getAdminMonitors);
+router.get("/audit-logs", getAdminAuditLogs);
 
 module.exports = router;
 
