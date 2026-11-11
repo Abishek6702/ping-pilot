@@ -30,7 +30,6 @@ async function probeSingleMethod(url, method, headers = {}, body = null, timeout
       method,
       headers: fetchHeaders,
       signal: controller.signal,
-      redirect: "follow",
     };
 
     if (!["GET", "HEAD"].includes(method) && body) {
@@ -40,7 +39,38 @@ async function probeSingleMethod(url, method, headers = {}, body = null, timeout
       }
     }
 
-    const response = await fetch(url, fetchOptions);
+    let currentUrl = url;
+    let redirectCount = 0;
+    const maxRedirects = 3;
+    let response;
+
+    while (redirectCount <= maxRedirects) {
+      response = await fetch(currentUrl, {
+        ...fetchOptions,
+        redirect: "manual",
+      });
+
+      if ([301, 302, 303, 307, 308].includes(response.status)) {
+        const locationHeader = response.headers?.get?.("location");
+        if (!locationHeader) {
+          break;
+        }
+        const nextUrl = new URL(locationHeader, currentUrl).toString();
+        const redirectSsrf = await validateUrlForMonitoring(nextUrl);
+        if (!redirectSsrf.valid) {
+          throw new Error(`Redirect SSRF Blocked: ${redirectSsrf.error}`);
+        }
+        if (response.body && typeof response.body.cancel === "function") {
+          await response.body.cancel().catch(() => {});
+        }
+        currentUrl = nextUrl;
+        redirectCount += 1;
+        continue;
+      }
+
+      break;
+    }
+
     const responseTime = Math.round(performance.now() - startTime);
 
     // Extract headers
@@ -84,17 +114,19 @@ async function probeSingleMethod(url, method, headers = {}, body = null, timeout
   } catch (err) {
     const responseTime = Math.round(performance.now() - startTime);
     const isTimeout = err.name === "AbortError" || err.message?.includes("aborted");
+    const isSsrfBlocked = Boolean(err.message && err.message.startsWith("Redirect SSRF Blocked:"));
 
     return {
       method,
-      status: isTimeout ? 504 : 502,
-      statusText: isTimeout ? "Gateway Timeout" : "Request Failed",
+      status: isSsrfBlocked ? 403 : isTimeout ? 504 : 502,
+      statusText: isSsrfBlocked ? "SSRF Blocked" : isTimeout ? "Gateway Timeout" : "Request Failed",
       responseTime,
       sizeBytes: 0,
       headers: {},
       body: "",
       parsedBody: null,
       isJson: false,
+      ssrfBlocked: isSsrfBlocked,
       error: isTimeout ? `Request timed out after ${timeoutSec}s` : err.message || "Network request failed",
     };
   } finally {
@@ -150,6 +182,13 @@ async function testEndpoint(req, res, next) {
     }
 
     const result = await probeSingleMethod(url, requestedMethod, headers, body, timeout);
+
+    if (result.ssrfBlocked) {
+      return res.status(403).json({
+        success: false,
+        error: result.error,
+      });
+    }
 
     return res.status(200).json({
       success: true,

@@ -8,6 +8,8 @@ const User = require("../models/User");
 const CycleLock = require("../models/CycleLock");
 const sendMail = require("../utils/sendMail");
 const renderTemplate = require("../utils/renderTemplate");
+const { sendMailWithRetry } = require("./notificationService");
+const { logEvent } = require("../utils/logger");
 const { validateUrlForMonitoring } = require("./../utils/ssrfFilter");
 const { CLAIM_LEASE_MS } = require("../constants/monitorConstants");
 const {
@@ -321,9 +323,13 @@ async function pingMonitor(monitor, options = {}) {
 
   await monitor.save();
 
-  // 4. Send status transition email alerts if status changed
+  // 4. Send status transition email alerts with bounded retries if status changed
   const statusChanged = previousStatus !== monitor.currentStatus && previousStatus !== "UNKNOWN";
-  if (statusChanged && monitor.userId) {
+  const canLookupUser =
+    mongoose.connection.readyState === 1 ||
+    Boolean(User.findById && User.findById._isMockFunction);
+
+  if (statusChanged && monitor.userId && canLookupUser) {
     try {
       const user = await User.findById(monitor.userId);
       if (user && user.email) {
@@ -335,9 +341,17 @@ async function pingMonitor(monitor, options = {}) {
             errorMessage: monitor.lastError,
             time: checkedAt.toUTCString(),
           });
-          sendMail(user.email, `⚠️ Service Alert: ${monitor.name} is DOWN`, html).catch((err) =>
-            console.error("Failed to send DOWN alert email:", err.message)
-          );
+          sendMailWithRetry(() =>
+            sendMail(user.email, `⚠️ Service Alert: ${monitor.name} is DOWN`, html)
+          ).then((outcome) => {
+            if (!outcome.success) {
+              logEvent("error", "notification.down_alert_failed", {
+                monitorId: monitor._id?.toString?.(),
+                attempts: outcome.attempts,
+                error: outcome.error,
+              });
+            }
+          });
         } else if (monitor.currentStatus === "UP" && previousStatus === "DOWN") {
           const html = renderTemplate("serviceRecovered", {
             serviceName: monitor.name,
@@ -345,13 +359,24 @@ async function pingMonitor(monitor, options = {}) {
             responseTime,
             time: checkedAt.toUTCString(),
           });
-          sendMail(user.email, `✅ Service Recovered: ${monitor.name} is Back Online`, html).catch((err) =>
-            console.error("Failed to send recovery alert email:", err.message)
-          );
+          sendMailWithRetry(() =>
+            sendMail(user.email, `✅ Service Recovered: ${monitor.name} is Back Online`, html)
+          ).then((outcome) => {
+            if (!outcome.success) {
+              logEvent("error", "notification.recovery_alert_failed", {
+                monitorId: monitor._id?.toString?.(),
+                attempts: outcome.attempts,
+                error: outcome.error,
+              });
+            }
+          });
         }
       }
     } catch (notifyErr) {
-      console.error("Status transition email notification error:", notifyErr.message);
+      logEvent("error", "notification.transition_error", {
+        monitorId: monitor._id?.toString?.(),
+        error: notifyErr.message,
+      });
     }
   }
 

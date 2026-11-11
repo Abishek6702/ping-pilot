@@ -26,6 +26,10 @@ const verifyGoogleIdToken = async (idToken) => {
             return reject(new Error(payload.error_description || "Invalid Google ID token"));
           }
 
+          if (process.env.NODE_ENV === "production" && !clientId) {
+            return reject(new Error("GOOGLE_CLIENT_ID is not configured on the server"));
+          }
+
           // Verify audience if configured
           if (clientId && payload.aud !== clientId) {
             return reject(new Error("Token audience mismatch (GOOGLE_CLIENT_ID)"));

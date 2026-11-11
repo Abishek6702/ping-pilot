@@ -306,8 +306,14 @@ export default function DashboardPage() {
               <Zap className="w-4 h-4" />
             </div>
             <div className="text-2xl font-bold text-slate-900 dark:text-white">
-              {metrics.averageResponseTime}
-              <span className="text-xs font-normal text-slate-400 ml-1">ms</span>
+              {metrics.averageResponseTime !== null && metrics.averageResponseTime !== undefined ? (
+                <>
+                  {metrics.averageResponseTime}
+                  <span className="text-xs font-normal text-slate-400 ml-1">ms</span>
+                </>
+              ) : (
+                <span className="text-lg text-slate-400">—</span>
+              )}
             </div>
             <div className="text-[11px] text-slate-400 mt-1">Last {timeRange}</div>
           </Card>
@@ -319,7 +325,11 @@ export default function DashboardPage() {
               <TrendingUp className="w-4 h-4" />
             </div>
             <div className="text-2xl font-bold text-slate-900 dark:text-white">
-              {metrics.overallUptime}%
+              {metrics.overallUptime !== null && metrics.overallUptime !== undefined ? (
+                `${metrics.overallUptime}%`
+              ) : (
+                <span className="text-lg text-slate-400">No Data</span>
+              )}
             </div>
             <div className="text-[11px] text-slate-400 mt-1">Availability ratio</div>
           </Card>
@@ -328,8 +338,24 @@ export default function DashboardPage() {
 
       {/* Charts Section */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
-        <ResponseTimeChart data={charts} timeRange={timeRange} />
-        <UptimeChart data={charts} timeRange={timeRange} />
+        <Card className="p-5">
+          <div className="mb-3">
+            <h3 className="text-sm font-semibold text-slate-900 dark:text-white">
+              Response Time Trend
+            </h3>
+            <p className="text-xs text-slate-400">Average latency (ms) over {timeRange}</p>
+          </div>
+          <ResponseTimeChart data={charts} timeRange={timeRange} />
+        </Card>
+        <Card className="p-5">
+          <div className="mb-3">
+            <h3 className="text-sm font-semibold text-slate-900 dark:text-white">
+              Availability Trend
+            </h3>
+            <p className="text-xs text-slate-400">Uptime % over {timeRange}</p>
+          </div>
+          <UptimeChart data={charts} timeRange={timeRange} />
+        </Card>
       </div>
 
       {/* Monitors Overview Table */}

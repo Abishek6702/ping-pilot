@@ -9,6 +9,7 @@ const cookieParser = require("cookie-parser");
 
 const { apiLimiter } = require("./middleware/rateLimiter");
 const { notFound, errorHandler } = require("./middleware/errorHandler");
+const { logEvent } = require("./utils/logger");
 
 const healthRoutes = require("./routes/healthRoutes");
 const authRoutes = require("./routes/authRoutes");
@@ -91,7 +92,26 @@ app.use(cookieParser());
 // 6. Response Compression
 app.use(compression());
 
-// --- ROUTES -s);
+// 7. Structured operational telemetry for slow or failed API requests
+if (process.env.NODE_ENV !== "test") {
+  app.use((req, res, next) => {
+    const startTime = Date.now();
+    res.on("finish", () => {
+      const durationMs = Date.now() - startTime;
+      if (res.statusCode >= 500 || durationMs >= 2000) {
+        logEvent(res.statusCode >= 500 ? "error" : "warn", "http.request", {
+          method: req.method,
+          path: req.originalUrl,
+          statusCode: res.statusCode,
+          durationMs,
+        });
+      }
+    });
+    next();
+  });
+}
+
+// --- ROUTES ---
 app.use("/api/health", healthRoutes);
 app.use("/api/auth", authRoutes);
 app.use("/api/monitors", monitorRoutes);
