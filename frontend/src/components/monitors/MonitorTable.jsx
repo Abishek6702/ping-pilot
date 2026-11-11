@@ -33,6 +33,7 @@ export default function MonitorTable({
           <tr className="border-b border-slate-200 dark:border-slate-800 text-[11px] font-semibold text-slate-400 dark:text-slate-500 uppercase tracking-wider">
             <th className="py-3 px-4">Service</th>
             <th className="py-3 px-4">Status</th>
+            <th className="py-3 px-4">Interval</th>
             <th className="py-3 px-4">Response Time</th>
             <th className="py-3 px-4">Uptime</th>
             <th className="py-3 px-4">Last Checked</th>
@@ -72,6 +73,13 @@ export default function MonitorTable({
                 {/* Status */}
                 <td className="py-3.5 px-4">
                   <StatusBadge status={m.currentStatus} />
+                </td>
+
+                {/* Interval */}
+                <td className="py-3.5 px-4 text-slate-600 dark:text-slate-300 whitespace-nowrap">
+                  <span className="inline-flex items-center px-2 py-0.5 rounded-md text-xs font-medium bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-700">
+                    Every {m.monitoringInterval ?? m.interval ?? 5} min
+                  </span>
                 </td>
 
                 {/* Response Time */}

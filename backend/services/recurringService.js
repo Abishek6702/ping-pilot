@@ -3,17 +3,35 @@ const { executeMonitoringCycle } = require("./monitoringEngine");
 let activeStopHandler = null;
 
 /**
- * Starts an in-process recurring monitoring cycle (runs every 5 minutes by default).
- * Acts as an internal fallback alongside the external GitHub Actions scheduler.
+ * Starts the optional local/fallback recurring monitoring cycle (60s cadence matching the central due-monitor window).
+ *
+ * In production (Render), GitHub Actions acts as the central 1-minute scheduler hitting
+ * POST /api/internal/monitor/run so two independent schedulers do not run by default.
+ * Set ENABLE_IN_PROCESS_WORKER="true" to opt into an in-process fallback alongside GitHub Actions;
+ * both share CycleLock and atomic per-monitor claiming in MongoDB.
  */
 function startRecurringWorker({
   logger = console,
-  intervalMs = 5 * 60 * 1000,
+  intervalMs = 60 * 1000,
   initialDelayMs = 15000,
   forceInTest = false,
 } = {}) {
   // Do not run background worker during test runs unless explicitly opted in by scheduler tests
   if (process.env.NODE_ENV === "test" && !forceInTest) {
+    return () => {};
+  }
+
+  // In production, GitHub Actions is the single central scheduler unless fallback is explicitly enabled
+  const explicitFlag = process.env.ENABLE_IN_PROCESS_WORKER;
+  const shouldRunInCurrentEnv =
+    forceInTest ||
+    explicitFlag === "true" ||
+    (process.env.NODE_ENV !== "production" && explicitFlag !== "false");
+
+  if (!shouldRunInCurrentEnv) {
+    logger.log(
+      "🕒 In-process scheduler disabled in production (central scheduling delegated to GitHub Actions -> /api/internal/monitor/run)"
+    );
     return () => {};
   }
 
@@ -23,12 +41,12 @@ function startRecurringWorker({
     return activeStopHandler;
   }
 
-  logger.log(`🕒 In-process monitoring worker initialized (interval: ${intervalMs / 1000}s)`);
+  logger.log(`🕒 In-process fallback monitoring worker initialized (interval: ${intervalMs / 1000}s)`);
 
-  // Run initial check after startup stabilization delay
+  // Run initial check after startup stabilization delay (processes only due/uninitialized monitors)
   const initialTimer = setTimeout(async () => {
     try {
-      logger.log("🔄 Running initial monitoring cycle on startup...");
+      logger.log("🔄 Running initial due-monitor check on startup...");
       const summary = await executeMonitoringCycle({ source: "startup" });
       if (summary.status === "skipped") {
         logger.log(`⚠️ Initial cycle skipped: ${summary.reason}`);
@@ -44,13 +62,12 @@ function startRecurringWorker({
 
   const intervalId = setInterval(async () => {
     try {
-      logger.log("🔄 Starting scheduled monitoring cycle...");
       const summary = await executeMonitoringCycle({ source: "interval" });
       if (summary.status === "skipped") {
         logger.log(`⚠️ Scheduled cycle skipped: ${summary.reason}`);
-      } else {
+      } else if ((summary.checked || 0) > 0) {
         logger.log(
-          `✅ Cycle complete: ${summary.checked || 0} checked, ${summary.up || 0} UP, ${summary.down || 0} DOWN (${summary.durationMs || 0}ms)`
+          `✅ Due-monitor cycle complete: ${summary.checked} checked, ${summary.up || 0} UP, ${summary.down || 0} DOWN (${summary.durationMs || 0}ms)`
         );
       }
     } catch (err) {

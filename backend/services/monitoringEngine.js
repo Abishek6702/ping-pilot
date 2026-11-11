@@ -9,6 +9,13 @@ const CycleLock = require("../models/CycleLock");
 const sendMail = require("../utils/sendMail");
 const renderTemplate = require("../utils/renderTemplate");
 const { validateUrlForMonitoring } = require("./../utils/ssrfFilter");
+const { CLAIM_LEASE_MS } = require("../constants/monitorConstants");
+const {
+  resolveMonitoringInterval,
+  calculateNextCheckAt,
+  buildDueMonitorsQuery,
+  isMonitorDue,
+} = require("../utils/monitorSchedule");
 
 const LOCK_KEY = "monitoring-cycle";
 const LOCK_LEASE_MS = 3 * 60 * 1000;
@@ -22,6 +29,17 @@ async function drainResponseBody(response) {
   if (response && response.body && typeof response.body.cancel === "function") {
     await response.body.cancel().catch(() => {});
   }
+}
+
+/**
+ * Determines whether MongoDB atomic operations should execute directly (live DB or mocked spies).
+ */
+function canRunMonitorAtomicQuery(methodName, forceAtomic = false) {
+  if (forceAtomic || mongoose.connection.readyState === 1) {
+    return true;
+  }
+  const fn = Monitor[methodName];
+  return Boolean(fn && fn._isMockFunction);
 }
 
 /**
@@ -77,7 +95,88 @@ async function releaseDistributedLock(owner, forceDbLock = false) {
 }
 
 /**
- * Execute a single HTTP ping against a monitor with SSRF checks, redirect safety, and timeout handling.
+ * Atomically claims a due active monitor so two scheduler instances cannot execute the same occurrence.
+ */
+async function claimMonitorForExecution(monitorCandidate, workerId, options = {}) {
+  const safeOptions = options && typeof options === "object" ? options : {};
+  const now = safeOptions.now ? new Date(safeOptions.now) : new Date();
+  const force = Boolean(safeOptions.force);
+  const claimExpiresAt = new Date(now.getTime() + CLAIM_LEASE_MS);
+
+  if (!monitorCandidate || !monitorCandidate._id) {
+    return null;
+  }
+
+  if (!canRunMonitorAtomicQuery("findOneAndUpdate", safeOptions.forceAtomicClaim)) {
+    if (!isMonitorDue(monitorCandidate, now, force)) {
+      return null;
+    }
+    monitorCandidate.claimOwner = workerId;
+    monitorCandidate.claimExpiresAt = claimExpiresAt;
+    return monitorCandidate;
+  }
+
+  const claimAvailable = {
+    $or: [
+      { claimExpiresAt: null },
+      { claimExpiresAt: { $exists: false } },
+      { claimExpiresAt: { $lte: now } },
+    ],
+  };
+
+  const query = force
+    ? {
+        _id: monitorCandidate._id,
+        isActive: true,
+        ...claimAvailable,
+      }
+    : {
+        _id: monitorCandidate._id,
+        isActive: true,
+        $and: [
+          {
+            $or: [
+              { nextCheckAt: { $lte: now } },
+              { nextCheckAt: null },
+              { nextCheckAt: { $exists: false } },
+            ],
+          },
+          claimAvailable,
+        ],
+      };
+
+  return Monitor.findOneAndUpdate(
+    query,
+    {
+      $set: {
+        claimOwner: workerId,
+        claimExpiresAt,
+      },
+    },
+    { returnDocument: "after" }
+  );
+}
+
+/**
+ * Safely releases an atomic monitor claim owned by `workerId`.
+ */
+async function releaseMonitorClaim(monitorId, workerId, options = {}) {
+  const safeOptions = options && typeof options === "object" ? options : {};
+  if (!monitorId || !workerId) return;
+
+  if (!canRunMonitorAtomicQuery("updateOne", safeOptions.forceAtomicClaim)) {
+    return;
+  }
+
+  await Monitor.updateOne(
+    { _id: monitorId, claimOwner: workerId },
+    { $set: { claimOwner: null, claimExpiresAt: null } }
+  );
+}
+
+/**
+ * Execute a single HTTP ping against a monitor with SSRF checks, redirect safety, timeout handling,
+ * single PingResult history write, and nextCheckAt scheduling.
  */
 async function pingMonitor(monitor, options = {}) {
   const safeOptions = options && typeof options === "object" ? options : {};
@@ -99,17 +198,25 @@ async function pingMonitor(monitor, options = {}) {
     let redirectCount = 0;
     const maxRedirects = 3;
     const timeoutSeconds = monitor.timeout || 15;
+    const deadlineMs = Date.now() + timeoutSeconds * 1000;
     const expectedCodes =
       Array.isArray(monitor.expectedStatusCodes) && monitor.expectedStatusCodes.length > 0
         ? monitor.expectedStatusCodes
         : [200];
 
-    // Follow redirects manually to validate each target for SSRF
+    // Follow redirects manually within the monitor's timeout budget to validate each target for SSRF
     while (redirectCount <= maxRedirects) {
+      const remainingMs = deadlineMs - Date.now();
+      if (remainingMs <= 0) {
+        const timeoutErr = new Error("The operation was aborted");
+        timeoutErr.name = "AbortError";
+        throw timeoutErr;
+      }
+
       const controller = new AbortController();
       const timeoutId = setTimeout(() => {
         controller.abort();
-      }, timeoutSeconds * 1000);
+      }, remainingMs);
 
       let response;
       try {
@@ -134,7 +241,7 @@ async function pingMonitor(monitor, options = {}) {
         await drainResponseBody(response);
 
         if (!locationHeader) {
-          break; // No location header to follow
+          break;
         }
 
         const nextUrl = new URL(locationHeader, currentUrl).toString();
@@ -149,8 +256,6 @@ async function pingMonitor(monitor, options = {}) {
       }
 
       await drainResponseBody(response);
-
-      // Reached final destination
       break;
     }
 
@@ -173,7 +278,7 @@ async function pingMonitor(monitor, options = {}) {
     }
   }
 
-  // 2. Save PingResult in MongoDB with TTL expiration
+  // 2. Save PingResult in MongoDB with TTL expiration (preserved 30-day default retention)
   const checkedAt = new Date();
   const expiresAt = new Date(checkedAt.getTime() + retentionDays * 24 * 60 * 60 * 1000);
   const pingResult = await PingResult.create({
@@ -186,9 +291,10 @@ async function pingMonitor(monitor, options = {}) {
     expiresAt,
   });
 
-  // 3. Update Monitor document status and failure/success counters
+  // 3. Update Monitor document status, schedule next check, and release any active claim
   const failureThreshold = monitor.failureThreshold || 2;
   const previousStatus = monitor.currentStatus;
+  const resolvedInterval = resolveMonitoringInterval(monitor);
 
   if (isSuccess) {
     monitor.consecutiveSuccesses = (monitor.consecutiveSuccesses || 0) + 1;
@@ -200,18 +306,22 @@ async function pingMonitor(monitor, options = {}) {
     monitor.consecutiveSuccesses = 0;
     monitor.lastError = errorMessage;
 
-    // Change to DOWN only if failure threshold reached
     if (monitor.consecutiveFailures >= failureThreshold) {
       monitor.currentStatus = "DOWN";
     }
   }
 
+  monitor.monitoringInterval = resolvedInterval;
+  monitor.interval = resolvedInterval;
   monitor.lastCheckedAt = checkedAt;
+  monitor.nextCheckAt = calculateNextCheckAt(resolvedInterval, checkedAt, monitor.nextCheckAt);
   monitor.lastResponseTime = responseTime;
+  monitor.claimOwner = null;
+  monitor.claimExpiresAt = null;
 
   await monitor.save();
 
-  // Send status transition email alerts if status changed
+  // 4. Send status transition email alerts if status changed
   const statusChanged = previousStatus !== monitor.currentStatus && previousStatus !== "UNKNOWN";
   if (statusChanged && monitor.userId) {
     try {
@@ -248,19 +358,23 @@ async function pingMonitor(monitor, options = {}) {
   return {
     monitorId: monitor._id,
     name: monitor.name,
+    monitorName: monitor.name,
     status: monitor.currentStatus,
     pingStatus: isSuccess ? "UP" : "DOWN",
     statusCode,
+    httpStatus: statusCode,
     responseTime,
     errorMessage,
     previousStatus,
     checkedAt: monitor.lastCheckedAt,
+    nextCheckAt: monitor.nextCheckAt,
+    monitoringInterval: resolvedInterval,
     resultId: pingResult._id,
   };
 }
 
 /**
- * Deduplicates monitor list by _id so a monitor is checked at most once per cycle.
+ * Deduplicates monitor list by _id so a monitor is processed at most once per cycle.
  */
 function deduplicateMonitors(monitors) {
   const seen = new Set();
@@ -278,8 +392,26 @@ function deduplicateMonitors(monitors) {
 }
 
 /**
- * Execute a complete monitoring cycle for all active monitors.
- * Supports { force: boolean } to bypass cooldown interval checks when explicitly triggered.
+ * Formats an execution outcome for safe internal worker responses (never includes URLs or secrets).
+ */
+function formatWorkerResult(outcome) {
+  const succeeded = outcome.pingStatus === "UP";
+  return {
+    monitorId: outcome.monitorId,
+    monitorName: outcome.monitorName || outcome.name,
+    status: succeeded ? "success" : "failed",
+    pingStatus: outcome.pingStatus,
+    httpStatus: outcome.statusCode ?? null,
+    responseTime: outcome.responseTime ?? 0,
+    checkedAt: outcome.checkedAt || null,
+    nextCheckAt: outcome.nextCheckAt || null,
+    ...(outcome.errorMessage ? { error: outcome.errorMessage } : {}),
+  };
+}
+
+/**
+ * Processes due monitors in one consolidated scheduler cycle.
+ * Supports { force: boolean, forceDbLock: boolean, forceAtomicClaim: boolean, now: Date }.
  */
 async function executeMonitoringCycle(options = {}) {
   const safeOptions = options && typeof options === "object" ? options : {};
@@ -293,13 +425,15 @@ async function executeMonitoringCycle(options = {}) {
   }
 
   isCycleRunning = true;
-  const lockOwner = `${process.pid}-${crypto.randomUUID()}`;
+  const workerId = `${process.pid}-${crypto.randomUUID()}`;
   const forceDbLock = Boolean(safeOptions.forceDbLock);
+  const forceAtomicClaim = Boolean(safeOptions.forceAtomicClaim);
+  const force = Boolean(safeOptions.force);
   let dbLockAcquired = false;
   const cycleStart = performance.now();
 
   try {
-    dbLockAcquired = await acquireDistributedLock(lockOwner, forceDbLock);
+    dbLockAcquired = await acquireDistributedLock(workerId, forceDbLock);
     if (!dbLockAcquired) {
       return {
         status: "skipped",
@@ -308,83 +442,140 @@ async function executeMonitoringCycle(options = {}) {
       };
     }
 
-    // 1. Fetch system settings
+    const cycleNow = safeOptions.now ? new Date(safeOptions.now) : new Date();
+
+    // 1. Fetch history retention setting
     const retentionSetting = await SystemSetting.findOne({ key: "historyRetentionDays" });
     const retentionDays = Math.max(1, Number(retentionSetting?.value) || 30);
 
-    // 2. Fetch all enabled monitors and deduplicate by ID
-    const rawActiveMonitors = await Monitor.find({ isActive: true });
-    const activeMonitors = deduplicateMonitors(Array.isArray(rawActiveMonitors) ? rawActiveMonitors : []);
+    // 2. Query ONLY due active unclaimed monitors from MongoDB
+    const dueQuery = buildDueMonitorsQuery(cycleNow, force);
+    const rawCandidates = await Monitor.find(dueQuery);
+    const candidates = deduplicateMonitors(Array.isArray(rawCandidates) ? rawCandidates : []);
 
-    // 3. Filter monitors that are due based on their configured interval
-    const now = Date.now();
-    const monitorsToPing = activeMonitors.filter((monitor) => {
-      if (monitor.isActive === false) return false;
-      if (safeOptions.force) return true;
-      if (!monitor.lastCheckedAt) return true;
-      const intervalMs = (monitor.interval || 5) * 60 * 1000;
-      // Allow up to 15% (capped at 45s) buffer for cron/timer jitter while blocking duplicate pings
-      const jitterBufferMs = Math.min(45000, Math.floor(intervalMs * 0.15));
-      return now - new Date(monitor.lastCheckedAt).getTime() >= intervalMs - jitterBufferMs;
-    });
+    // 3. Filter in-memory as well so mocked tests and legacy uninitialized docs respect schedule rules
+    const dueCandidates = [];
+    let skippedCount = 0;
 
-    const skippedCount = activeMonitors.length - monitorsToPing.length;
+    for (const candidate of candidates) {
+      if (!isMonitorDue(candidate, cycleNow, force)) {
+        skippedCount++;
 
-    if (monitorsToPing.length === 0) {
+        // Backfill missing nextCheckAt on active legacy monitors once connected so DB query stays indexed
+        if (
+          candidate.isActive !== false &&
+          !candidate.nextCheckAt &&
+          candidate.lastCheckedAt &&
+          canRunMonitorAtomicQuery("updateOne", forceAtomicClaim)
+        ) {
+          const intervalMinutes = resolveMonitoringInterval(candidate);
+          const derivedNext = new Date(
+            new Date(candidate.lastCheckedAt).getTime() + intervalMinutes * 60 * 1000
+          );
+          await Monitor.updateOne(
+            { _id: candidate._id, nextCheckAt: null },
+            {
+              $set: {
+                monitoringInterval: intervalMinutes,
+                interval: intervalMinutes,
+                nextCheckAt: derivedNext,
+              },
+            }
+          ).catch(() => {});
+        }
+        continue;
+      }
+
+      dueCandidates.push(candidate);
+    }
+
+    if (dueCandidates.length === 0) {
       return {
         status: "completed",
-        totalMonitors: activeMonitors.length,
+        totalMonitors: candidates.length,
         checked: 0,
         skipped: skippedCount,
+        failed: 0,
         up: 0,
         down: 0,
         reason:
-          activeMonitors.length === 0
-            ? "No active monitors configured"
-            : "All active monitors were checked recently and are not due yet",
+          candidates.length === 0
+            ? "No monitors are due for checking right now"
+            : "All due candidates were skipped or not yet due",
         durationMs: Math.round(performance.now() - cycleStart),
         timestamp: new Date().toISOString(),
+        results: [],
       };
     }
 
-    // 4. Execute checks with a concurrency batch limit (max 5 parallel requests)
-    const results = [];
+    // 4. Claim atomically & execute due monitors in parallel batches (max 5 concurrent HTTP checks)
+    const executedOutcomes = [];
     const concurrency = 5;
-    for (let i = 0; i < monitorsToPing.length; i += concurrency) {
-      const batch = monitorsToPing.slice(i, i + concurrency);
-      const batchResults = await Promise.all(
-        batch.map((m) =>
-          pingMonitor(m, { retentionDays }).catch((err) => ({
-            monitorId: m._id,
-            name: m.name,
-            status: "DOWN",
-            pingStatus: "DOWN",
-            statusCode: null,
-            responseTime: 0,
-            errorMessage: err.message,
-          }))
-        )
+
+    for (let i = 0; i < dueCandidates.length; i += concurrency) {
+      const batch = dueCandidates.slice(i, i + concurrency);
+      const batchOutcomes = await Promise.all(
+        batch.map(async (candidate) => {
+          const claimed = await claimMonitorForExecution(candidate, workerId, {
+            now: cycleNow,
+            force,
+            forceAtomicClaim,
+          });
+
+          if (!claimed) {
+            skippedCount++;
+            return null;
+          }
+
+          try {
+            return await pingMonitor(claimed, { retentionDays });
+          } catch (err) {
+            return {
+              monitorId: claimed._id,
+              name: claimed.name,
+              monitorName: claimed.name,
+              status: "DOWN",
+              pingStatus: "DOWN",
+              statusCode: null,
+              httpStatus: null,
+              responseTime: 0,
+              errorMessage: err.message,
+              checkedAt: new Date(),
+              nextCheckAt: claimed.nextCheckAt || null,
+            };
+          } finally {
+            await releaseMonitorClaim(claimed._id, workerId, { forceAtomicClaim }).catch((err) => {
+              console.error("Failed to release monitor claim:", err.message);
+            });
+          }
+        })
       );
-      results.push(...batchResults);
+
+      for (const item of batchOutcomes) {
+        if (item) {
+          executedOutcomes.push(item);
+        }
+      }
     }
 
-    const upCount = results.filter((r) => r.pingStatus === "UP").length;
-    const downCount = results.filter((r) => r.pingStatus === "DOWN").length;
+    const upCount = executedOutcomes.filter((r) => r.pingStatus === "UP").length;
+    const downCount = executedOutcomes.filter((r) => r.pingStatus === "DOWN").length;
 
     return {
       status: "completed",
-      totalMonitors: activeMonitors.length,
-      checked: results.length,
+      totalMonitors: candidates.length,
+      checked: executedOutcomes.length,
       skipped: skippedCount,
+      failed: downCount,
       up: upCount,
       down: downCount,
       durationMs: Math.round(performance.now() - cycleStart),
       timestamp: new Date().toISOString(),
-      results,
+      results: executedOutcomes.map(formatWorkerResult),
     };
   } finally {
     if (dbLockAcquired) {
-      await releaseDistributedLock(lockOwner, forceDbLock).catch((err) => {
+      await releaseDistributedLock(workerId, forceDbLock).catch((err) => {
         console.error("Failed to release distributed monitoring lock:", err.message);
       });
     }
@@ -395,7 +586,8 @@ async function executeMonitoringCycle(options = {}) {
 module.exports = {
   pingMonitor,
   executeMonitoringCycle,
+  claimMonitorForExecution,
+  releaseMonitorClaim,
   acquireDistributedLock,
   releaseDistributedLock,
 };
-

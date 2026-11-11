@@ -122,7 +122,7 @@ export default function Sidebar({ isOpen, onClose }) {
               </span>
             </div>
             <p className="text-[11px] text-slate-500 dark:text-slate-400">
-              5-minute interval monitoring via GitHub Actions
+              Per-monitor interval checks via GitHub Actions
             </p>
           </div>
         </div>

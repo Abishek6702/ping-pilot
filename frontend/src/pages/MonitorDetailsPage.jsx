@@ -150,7 +150,7 @@ export default function MonitorDetailsPage() {
     setModalLoading(true);
     try {
       const res = await fetch(`${API_URL}/monitors/${id}`, {
-        method: "PUT",
+        method: "PATCH",
         headers: getHeaders(),
         body: JSON.stringify(formData),
         credentials: "include",
@@ -252,7 +252,7 @@ export default function MonitorDetailsPage() {
               <StatusBadge status={currentMonitor.currentStatus} size="lg" />
             </div>
 
-            <div className="flex items-center gap-2 text-xs text-slate-500 dark:text-slate-400">
+            <div className="flex flex-wrap items-center gap-2 text-xs text-slate-500 dark:text-slate-400">
               <a
                 href={currentMonitor.url}
                 target="_blank"
@@ -265,7 +265,18 @@ export default function MonitorDetailsPage() {
               <span>•</span>
               <span>Method: {currentMonitor.method || "GET"}</span>
               <span>•</span>
+              <span>Interval: Every {currentMonitor.monitoringInterval ?? currentMonitor.interval ?? 5} min</span>
+              <span>•</span>
               <span>Timeout: {currentMonitor.timeout || 15}s</span>
+              <span>•</span>
+              <span>
+                Next check:{" "}
+                {currentMonitor.isActive === false
+                  ? "Paused"
+                  : currentMonitor.nextCheckAt
+                    ? new Date(currentMonitor.nextCheckAt).toLocaleString()
+                    : "Next cycle"}
+              </span>
             </div>
 
             {currentMonitor.description && (

@@ -1,4 +1,15 @@
 const { body, validationResult } = require("express-validator");
+const { ALLOWED_MONITORING_INTERVALS } = require("../constants/monitorConstants");
+
+function validateAllowedInterval(value) {
+  const numeric = Number(value);
+  if (!Number.isInteger(numeric) || !ALLOWED_MONITORING_INTERVALS.includes(numeric)) {
+    throw new Error(
+      `Monitoring interval must be one of: ${ALLOWED_MONITORING_INTERVALS.join(", ")} minutes`
+    );
+  }
+  return true;
+}
 
 function checkValidationErrors(req, res, next) {
   const errors = validationResult(req);
@@ -55,10 +66,16 @@ const validateMonitorInput = [
     .trim()
     .isLength({ max: 500 })
     .withMessage("Description cannot exceed 500 characters"),
+  body("monitoringInterval")
+    .optional()
+    .isInt({ min: 1 })
+    .withMessage("Monitoring interval must be a whole number of minutes")
+    .custom(validateAllowedInterval),
   body("interval")
     .optional()
-    .isInt({ min: 1, max: 1440 })
-    .withMessage("Interval must be between 1 and 1440 minutes"),
+    .isInt({ min: 1 })
+    .withMessage("Interval must be a whole number of minutes")
+    .custom(validateAllowedInterval),
   body("timeout")
     .optional()
     .isInt({ min: 1, max: 60 })
@@ -94,10 +111,16 @@ const validateMonitorUpdate = [
     .trim()
     .isLength({ max: 500 })
     .withMessage("Description cannot exceed 500 characters"),
+  body("monitoringInterval")
+    .optional()
+    .isInt({ min: 1 })
+    .withMessage("Monitoring interval must be a whole number of minutes")
+    .custom(validateAllowedInterval),
   body("interval")
     .optional()
-    .isInt({ min: 1, max: 1440 })
-    .withMessage("Interval must be between 1 and 1440 minutes"),
+    .isInt({ min: 1 })
+    .withMessage("Interval must be a whole number of minutes")
+    .custom(validateAllowedInterval),
   body("timeout")
     .optional()
     .isInt({ min: 1, max: 60 })

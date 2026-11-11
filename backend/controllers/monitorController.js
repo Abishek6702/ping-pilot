@@ -2,6 +2,14 @@ const Monitor = require("../models/Monitor");
 const PingResult = require("../models/PingResult");
 const { validateUrlForMonitoring } = require("../utils/ssrfFilter");
 const { pingMonitor } = require("../services/monitoringEngine");
+const {
+  ALLOWED_MONITORING_INTERVALS,
+  DEFAULT_MONITORING_INTERVAL,
+  isValidMonitoringInterval,
+  resolveMonitoringInterval,
+  computeIntervalChangeNextCheckAt,
+  computeReactivatedNextCheckAt,
+} = require("../utils/monitorSchedule");
 
 function isAuthorizedForMonitor(user, monitor) {
   if (!user) return false;
@@ -69,12 +77,24 @@ async function createMonitor(req, res, next) {
       description,
       url,
       method = "GET",
-      interval = 5,
+      monitoringInterval,
+      interval,
       timeout = 15,
       expectedStatusCodes = [200],
       isActive = true,
       failureThreshold = 2,
     } = req.body;
+
+    const rawInterval = monitoringInterval !== undefined ? monitoringInterval : interval;
+    if (rawInterval !== undefined && !isValidMonitoringInterval(rawInterval)) {
+      return res.status(400).json({
+        success: false,
+        error: `Monitoring interval must be one of: ${ALLOWED_MONITORING_INTERVALS.join(", ")} minutes`,
+      });
+    }
+
+    const resolvedInterval =
+      rawInterval !== undefined ? Number(rawInterval) : DEFAULT_MONITORING_INTERVAL;
 
     // Validate URL against SSRF
     const ssrfCheck = await validateUrlForMonitoring(url);
@@ -85,16 +105,24 @@ async function createMonitor(req, res, next) {
       });
     }
 
+    const active = isActive !== false;
+    // Active new monitors schedule their first check immediately for the next scheduler run
+    const now = new Date();
+
     const monitor = await Monitor.create({
       name,
       description: description || "",
       url,
       method: "GET",
-      interval: Number(interval) || 5,
+      monitoringInterval: resolvedInterval,
+      interval: resolvedInterval,
       timeout: Number(timeout) || 15,
       expectedStatusCodes: expectedStatusCodes || [200],
-      isActive: isActive !== false,
-      currentStatus: isActive === false ? "PAUSED" : "UNKNOWN",
+      isActive: active,
+      currentStatus: active ? "UNKNOWN" : "PAUSED",
+      nextCheckAt: active ? now : null,
+      claimOwner: null,
+      claimExpiresAt: null,
       failureThreshold: Number(failureThreshold) || 2,
       userId: req.user?._id || null,
     });
@@ -164,12 +192,21 @@ async function updateMonitor(req, res, next) {
       name,
       description,
       url,
+      monitoringInterval,
       interval,
       timeout,
       expectedStatusCodes,
       isActive,
       failureThreshold,
     } = req.body;
+
+    const rawInterval = monitoringInterval !== undefined ? monitoringInterval : interval;
+    if (rawInterval !== undefined && !isValidMonitoringInterval(rawInterval)) {
+      return res.status(400).json({
+        success: false,
+        error: `Monitoring interval must be one of: ${ALLOWED_MONITORING_INTERVALS.join(", ")} minutes`,
+      });
+    }
 
     // If URL is being changed, validate for SSRF
     if (url && url !== monitor.url) {
@@ -183,20 +220,43 @@ async function updateMonitor(req, res, next) {
       monitor.url = url;
     }
 
+    const wasActive = monitor.isActive !== false;
+    const prevInterval = resolveMonitoringInterval(monitor);
+
     if (name !== undefined) monitor.name = name;
     if (description !== undefined) monitor.description = description;
-    if (interval !== undefined) monitor.interval = Number(interval);
     if (timeout !== undefined) monitor.timeout = Number(timeout);
     if (expectedStatusCodes !== undefined) monitor.expectedStatusCodes = expectedStatusCodes;
     if (failureThreshold !== undefined) monitor.failureThreshold = Number(failureThreshold);
 
+    const nextInterval = rawInterval !== undefined ? Number(rawInterval) : prevInterval;
+    monitor.monitoringInterval = nextInterval;
+    monitor.interval = nextInterval;
+
     if (isActive !== undefined) {
-      monitor.isActive = Boolean(isActive);
-      if (!monitor.isActive) {
+      const nextActive = Boolean(isActive);
+      monitor.isActive = nextActive;
+      if (!nextActive) {
         monitor.currentStatus = "PAUSED";
-      } else if (monitor.currentStatus === "PAUSED") {
+        monitor.nextCheckAt = null;
+        monitor.claimOwner = null;
+        monitor.claimExpiresAt = null;
+      } else if (!wasActive) {
         monitor.currentStatus = "UNKNOWN";
+        monitor.nextCheckAt = computeReactivatedNextCheckAt(nextInterval, monitor.lastCheckedAt);
+      } else if (rawInterval !== undefined || !monitor.nextCheckAt) {
+        monitor.nextCheckAt = computeIntervalChangeNextCheckAt(
+          nextInterval,
+          monitor.lastCheckedAt,
+          monitor.nextCheckAt
+        );
       }
+    } else if (monitor.isActive && (rawInterval !== undefined || !monitor.nextCheckAt)) {
+      monitor.nextCheckAt = computeIntervalChangeNextCheckAt(
+        nextInterval,
+        monitor.lastCheckedAt,
+        monitor.nextCheckAt
+      );
     }
 
     await monitor.save();
@@ -268,10 +328,18 @@ async function toggleMonitor(req, res, next) {
     }
 
     monitor.isActive = !monitor.isActive;
+    const resolvedInterval = resolveMonitoringInterval(monitor);
+    monitor.monitoringInterval = resolvedInterval;
+    monitor.interval = resolvedInterval;
+
     if (!monitor.isActive) {
       monitor.currentStatus = "PAUSED";
+      monitor.nextCheckAt = null;
+      monitor.claimOwner = null;
+      monitor.claimExpiresAt = null;
     } else {
       monitor.currentStatus = "UNKNOWN";
+      monitor.nextCheckAt = computeReactivatedNextCheckAt(resolvedInterval, monitor.lastCheckedAt);
     }
 
     await monitor.save();

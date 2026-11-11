@@ -2,8 +2,9 @@ name: PingPilot Monitor Scheduler
 
 on:
   schedule:
-    # Executes every 5 minutes (offset at 2 minutes past the hour)
-    - cron: "2-59/5 * * * *"
+    # Central 1-minute trigger: backend atomically claims and checks only due monitors (based on each monitor's monitoringInterval).
+    # Note: GitHub Actions scheduled crons may experience queue jitter/delays under load.
+    - cron: "* * * * *"
   workflow_dispatch:
     inputs:
       reason:

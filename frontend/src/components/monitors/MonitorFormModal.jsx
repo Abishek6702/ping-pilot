@@ -2,6 +2,22 @@ import React, { useState, useEffect } from "react";
 import Modal from "../common/Modal";
 import toast from "react-hot-toast";
 
+const MONITORING_INTERVAL_OPTIONS = [
+  { value: 1, label: "Every 1 minute" },
+  { value: 5, label: "Every 5 minutes" },
+  { value: 10, label: "Every 10 minutes" },
+  { value: 15, label: "Every 15 minutes" },
+  { value: 30, label: "Every 30 minutes" },
+  { value: 60, label: "Every 60 minutes" },
+];
+
+const ALLOWED_MONITORING_INTERVALS = MONITORING_INTERVAL_OPTIONS.map((opt) => opt.value);
+
+function resolveInitialInterval(initialData) {
+  const candidate = Number(initialData?.monitoringInterval ?? initialData?.interval);
+  return ALLOWED_MONITORING_INTERVALS.includes(candidate) ? candidate : 5;
+}
+
 export default function MonitorFormModal({
   isOpen,
   onClose,
@@ -14,7 +30,7 @@ export default function MonitorFormModal({
     description: "",
     url: "",
     method: "GET",
-    interval: 5,
+    monitoringInterval: 5,
     timeout: 15,
     expectedStatusCodes: "200",
     isActive: true,
@@ -27,7 +43,7 @@ export default function MonitorFormModal({
         description: initialData.description || "",
         url: initialData.url || "",
         method: initialData.method || "GET",
-        interval: initialData.interval || 5,
+        monitoringInterval: resolveInitialInterval(initialData),
         timeout: initialData.timeout || 15,
         expectedStatusCodes: Array.isArray(initialData.expectedStatusCodes)
           ? initialData.expectedStatusCodes.join(", ")
@@ -40,7 +56,7 @@ export default function MonitorFormModal({
         description: "",
         url: "",
         method: "GET",
-        interval: 5,
+        monitoringInterval: 5,
         timeout: 15,
         expectedStatusCodes: "200",
         isActive: true,
@@ -52,7 +68,12 @@ export default function MonitorFormModal({
     const { name, value, type, checked } = e.target;
     setFormData((prev) => ({
       ...prev,
-      [name]: type === "checkbox" ? checked : value,
+      [name]:
+        type === "checkbox"
+          ? checked
+          : name === "monitoringInterval"
+            ? Number(value)
+            : value,
     }));
   };
 
@@ -75,6 +96,11 @@ export default function MonitorFormModal({
       return toast.error("Please enter a valid HTTP/HTTPS URL");
     }
 
+    const parsedInterval = Number(formData.monitoringInterval);
+    if (!Number.isInteger(parsedInterval) || !ALLOWED_MONITORING_INTERVALS.includes(parsedInterval)) {
+      return toast.error("Monitoring interval must be 1, 5, 10, 15, 30, or 60 minutes");
+    }
+
     // Parse status codes
     const codes = formData.expectedStatusCodes
       .split(",")
@@ -86,11 +112,14 @@ export default function MonitorFormModal({
     }
 
     const payload = {
-      ...formData,
+      name: formData.name,
+      description: formData.description,
       url: formData.url.trim(),
-      interval: Number(formData.interval) || 5,
+      method: formData.method,
+      monitoringInterval: parsedInterval,
       timeout: Number(formData.timeout) || 15,
       expectedStatusCodes: codes,
+      isActive: Boolean(formData.isActive),
     };
 
     onSubmit(payload);
@@ -153,10 +182,39 @@ export default function MonitorFormModal({
 
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
           <div>
-            <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1.5">
+            <label
+              htmlFor="monitoringInterval"
+              className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1.5"
+            >
+              Monitoring Interval
+            </label>
+            <select
+              id="monitoringInterval"
+              name="monitoringInterval"
+              value={formData.monitoringInterval}
+              onChange={handleChange}
+              className="w-full px-3.5 py-2 text-sm bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#0E7A88] focus:border-[#0E7A88] text-slate-900 dark:text-white"
+            >
+              {MONITORING_INTERVAL_OPTIONS.map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+            <p className="mt-1 text-[11px] text-slate-500 dark:text-slate-400">
+              How frequently PingPilot checks this endpoint.
+            </p>
+          </div>
+
+          <div>
+            <label
+              htmlFor="timeout"
+              className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1.5"
+            >
               Request Timeout (seconds)
             </label>
             <input
+              id="timeout"
               type="number"
               name="timeout"
               value={formData.timeout}
@@ -165,21 +223,28 @@ export default function MonitorFormModal({
               max="60"
               className="w-full px-3.5 py-2 text-sm bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#0E7A88] focus:border-[#0E7A88] text-slate-900 dark:text-white"
             />
+            <p className="mt-1 text-[11px] text-slate-500 dark:text-slate-400">
+              Maximum time PingPilot waits for a response during an individual check.
+            </p>
           </div>
+        </div>
 
-          <div>
-            <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1.5">
-              Expected Status Codes
-            </label>
-            <input
-              type="text"
-              name="expectedStatusCodes"
-              value={formData.expectedStatusCodes}
-              onChange={handleChange}
-              placeholder="200, 201, 204"
-              className="w-full px-3.5 py-2 text-sm bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#0E7A88] focus:border-[#0E7A88] text-slate-900 dark:text-white"
-            />
-          </div>
+        <div>
+          <label
+            htmlFor="expectedStatusCodes"
+            className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1.5"
+          >
+            Expected Status Codes
+          </label>
+          <input
+            id="expectedStatusCodes"
+            type="text"
+            name="expectedStatusCodes"
+            value={formData.expectedStatusCodes}
+            onChange={handleChange}
+            placeholder="200, 201, 204"
+            className="w-full px-3.5 py-2 text-sm bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#0E7A88] focus:border-[#0E7A88] text-slate-900 dark:text-white"
+          />
         </div>
 
         <div className="flex items-center gap-2 pt-2">

@@ -6,8 +6,18 @@ const Monitor = require("../models/Monitor");
 const PingResult = require("../models/PingResult");
 const SystemSetting = require("../models/SystemSetting");
 const CycleLock = require("../models/CycleLock");
-const { pingMonitor, executeMonitoringCycle } = require("../services/monitoringEngine");
+const {
+  pingMonitor,
+  executeMonitoringCycle,
+  claimMonitorForExecution,
+  releaseMonitorClaim,
+} = require("../services/monitoringEngine");
 const { startRecurringWorker } = require("../services/recurringService");
+const { buildDueMonitorsQuery } = require("../utils/monitorSchedule");
+const {
+  buildMigrationUpdate,
+  migrateMonitorIntervals,
+} = require("../scripts/migrateMonitorIntervals");
 
 process.env.PINGPILOT_WORKER_SECRET = "super-secret-worker-key-999";
 
@@ -21,6 +31,7 @@ function createMockMonitor(overrides = {}) {
     name: "Mock API Service",
     url: "https://8.8.8.8/health",
     method: "GET",
+    monitoringInterval: 5,
     interval: 5,
     timeout: 10,
     expectedStatusCodes: [200],
@@ -30,6 +41,9 @@ function createMockMonitor(overrides = {}) {
     consecutiveSuccesses: 1,
     failureThreshold: 2,
     lastCheckedAt: null,
+    nextCheckAt: null,
+    claimOwner: null,
+    claimExpiresAt: null,
     save: jest.fn().mockResolvedValue(true),
     ...overrides,
   };
@@ -171,6 +185,34 @@ describe("Monitoring Engine, Scheduler & Worker Endpoint", () => {
       const outcome = await pingMonitor(mockMonitor);
       expect(outcome.pingStatus).toBe("DOWN");
       expect(outcome.errorMessage).toContain("ECONNREFUSED");
+    });
+
+    test("handles HTTP 429 rate-limit response cleanly and sets nextCheckAt based on monitoringInterval", async () => {
+      const mockMonitor = createMockMonitor({
+        name: "Rate Limited API",
+        url: "https://8.8.8.8/ratelimit",
+        monitoringInterval: 15,
+        interval: 15,
+        expectedStatusCodes: [200],
+      });
+
+      global.fetch = jest.fn().mockResolvedValue({
+        status: 429,
+        headers: new Map(),
+      });
+      const createSpy = jest.spyOn(PingResult, "create").mockResolvedValue({
+        _id: "70d0fe4f5311236168a109cd",
+      });
+
+      const outcome = await pingMonitor(mockMonitor);
+      expect(outcome.pingStatus).toBe("DOWN");
+      expect(outcome.statusCode).toBe(429);
+      expect(outcome.errorMessage).toContain("429");
+      expect(mockMonitor.nextCheckAt).toBeInstanceOf(Date);
+      const diffMs = mockMonitor.nextCheckAt.getTime() - mockMonitor.lastCheckedAt.getTime();
+      expect(diffMs).toBeGreaterThanOrEqual(14 * 60 * 1000);
+      expect(diffMs).toBeLessThanOrEqual(16 * 60 * 1000);
+      expect(createSpy).toHaveBeenCalledTimes(1);
     });
   });
 
@@ -317,6 +359,157 @@ describe("Monitoring Engine, Scheduler & Worker Endpoint", () => {
       expect(recoverySummary.checked).toBe(1);
     });
 
+    test("selects only due active unclaimed monitors and skips future and paused monitors", async () => {
+      const t0 = new Date("2026-11-11T10:00:00.000Z");
+      const dueMonitor = createMockMonitor({
+        name: "Due Now",
+        url: "https://8.8.8.8/due",
+        monitoringInterval: 5,
+        nextCheckAt: new Date("2026-11-11T09:59:30.000Z"),
+        isActive: true,
+      });
+      const futureMonitor = createMockMonitor({
+        name: "Future Check",
+        url: "https://8.8.8.8/future",
+        monitoringInterval: 10,
+        nextCheckAt: new Date("2026-11-11T10:07:00.000Z"),
+        isActive: true,
+      });
+      const pausedMonitor = createMockMonitor({
+        name: "Paused Service",
+        url: "https://8.8.8.8/paused",
+        monitoringInterval: 1,
+        nextCheckAt: null,
+        isActive: false,
+        currentStatus: "PAUSED",
+      });
+
+      const findSpy = jest
+        .spyOn(Monitor, "find")
+        .mockResolvedValue([dueMonitor, futureMonitor, pausedMonitor]);
+      const createSpy = jest.spyOn(PingResult, "create").mockResolvedValue({ _id: "res-due" });
+      global.fetch = jest.fn().mockResolvedValue({ status: 200, headers: new Map() });
+
+      const expectedQuery = buildDueMonitorsQuery(t0, false);
+      const summary = await executeMonitoringCycle({ now: t0 });
+
+      expect(findSpy).toHaveBeenCalledWith(expectedQuery);
+      expect(summary.status).toBe("completed");
+      expect(summary.checked).toBe(1);
+      expect(summary.skipped).toBe(2);
+      expect(summary.up).toBe(1);
+      expect(summary.failed).toBe(0);
+      expect(global.fetch).toHaveBeenCalledTimes(1);
+      expect(createSpy).toHaveBeenCalledTimes(1);
+      expect(summary.results).toHaveLength(1);
+      expect(summary.results[0]).toEqual(
+        expect.objectContaining({
+          monitorId: dueMonitor._id,
+          monitorName: "Due Now",
+          status: "success",
+          pingStatus: "UP",
+          httpStatus: 200,
+        })
+      );
+    });
+
+    test("executes FinLab (10m) and PingPilot (5m) independently across 1-minute scheduler ticks", async () => {
+      jest.useFakeTimers();
+      const baseTime = new Date("2026-11-11T10:00:00.000Z");
+      jest.setSystemTime(baseTime);
+
+      const finLab = createMockMonitor({
+        name: "FinLab",
+        url: "https://8.8.8.8/finlab",
+        monitoringInterval: 10,
+        interval: 10,
+        nextCheckAt: new Date("2026-11-11T10:00:00.000Z"),
+      });
+      const pingPilot = createMockMonitor({
+        name: "PingPilot",
+        url: "https://1.1.1.1/pingpilot",
+        monitoringInterval: 5,
+        interval: 5,
+        nextCheckAt: new Date("2026-11-11T10:00:00.000Z"),
+      });
+
+      jest.spyOn(Monitor, "find").mockResolvedValue([finLab, pingPilot]);
+      const pingCreateSpy = jest.spyOn(PingResult, "create").mockResolvedValue({ _id: "tick-res" });
+      global.fetch = jest.fn().mockResolvedValue({ status: 200, headers: new Map() });
+
+      // Tick t = 0m: both FinLab and PingPilot are due
+      const s0 = await executeMonitoringCycle({ now: new Date("2026-11-11T10:00:00.000Z") });
+      expect(s0.checked).toBe(2);
+
+      // Tick t = 1m: neither is due
+      jest.setSystemTime(new Date("2026-11-11T10:01:00.000Z"));
+      const s1 = await executeMonitoringCycle({ now: new Date("2026-11-11T10:01:00.000Z") });
+      expect(s1.checked).toBe(0);
+
+      // Tick t = 5m: ONLY PingPilot (5m interval) is due; FinLab (10m) waits until 10:10
+      jest.setSystemTime(new Date("2026-11-11T10:05:00.000Z"));
+      const s5 = await executeMonitoringCycle({ now: new Date("2026-11-11T10:05:00.000Z") });
+      expect(s5.checked).toBe(1);
+      expect(s5.results[0].monitorName).toBe("PingPilot");
+
+      // Tick t = 9m: neither is due
+      jest.setSystemTime(new Date("2026-11-11T10:09:00.000Z"));
+      const s9 = await executeMonitoringCycle({ now: new Date("2026-11-11T10:09:00.000Z") });
+      expect(s9.checked).toBe(0);
+
+      // Tick t = 10m: BOTH FinLab (10m) and PingPilot (5m) are due
+      jest.setSystemTime(new Date("2026-11-11T10:10:00.000Z"));
+      const s10 = await executeMonitoringCycle({ now: new Date("2026-11-11T10:10:00.000Z") });
+      expect(s10.checked).toBe(2);
+
+      const finLabPings = pingCreateSpy.mock.calls.filter(
+        ([arg]) => arg.monitorId === finLab._id
+      ).length;
+      const pingPilotPings = pingCreateSpy.mock.calls.filter(
+        ([arg]) => arg.monitorId === pingPilot._id
+      ).length;
+      expect(finLabPings).toBe(2); // t=0m, t=10m
+      expect(pingPilotPings).toBe(3); // t=0m, t=5m, t=10m
+    });
+
+    test("prevents concurrent double-claim in atomic claimMonitorForExecution and recovers after lease expiry", async () => {
+      const candidate = createMockMonitor({ name: "Race Service", monitoringInterval: 5 });
+      const now = new Date("2026-11-11T10:00:00.000Z");
+
+      const findOneAndUpdateSpy = jest
+        .spyOn(Monitor, "findOneAndUpdate")
+        .mockResolvedValueOnce({ ...candidate, claimOwner: "worker-A" }) // first worker wins
+        .mockResolvedValueOnce(null); // second concurrent worker sees existing claim -> returns null
+
+      const [claimA, claimB] = await Promise.all([
+        claimMonitorForExecution(candidate, "worker-A", { now, forceAtomicClaim: true }),
+        claimMonitorForExecution(candidate, "worker-B", { now, forceAtomicClaim: true }),
+      ]);
+
+      expect(claimA).not.toBeNull();
+      expect(claimA.claimOwner).toBe("worker-A");
+      expect(claimB).toBeNull();
+      expect(findOneAndUpdateSpy).toHaveBeenCalledTimes(2);
+
+      // Check lease-expiry query allows recovery if previous worker crashed
+      const expiredNow = new Date("2026-11-11T10:03:00.000Z");
+      findOneAndUpdateSpy.mockResolvedValueOnce({ ...candidate, claimOwner: "worker-C" });
+      const recovered = await claimMonitorForExecution(candidate, "worker-C", {
+        now: expiredNow,
+        forceAtomicClaim: true,
+      });
+      expect(recovered.claimOwner).toBe("worker-C");
+      const recoveryFilter = findOneAndUpdateSpy.mock.calls[2][0];
+      expect(JSON.stringify(recoveryFilter)).toContain("claimExpiresAt");
+
+      const releaseSpy = jest.spyOn(Monitor, "updateOne").mockResolvedValue({ modifiedCount: 1 });
+      await releaseMonitorClaim(candidate._id, "worker-C", { forceAtomicClaim: true });
+      expect(releaseSpy).toHaveBeenCalledWith(
+        { _id: candidate._id, claimOwner: "worker-C" },
+        { $set: { claimOwner: null, claimExpiresAt: null } }
+      );
+    });
+
     test("respects distributed CycleLock conflict and releases lock on failure when connected", async () => {
       const duplicateErr = new Error("E11000 duplicate key");
       duplicateErr.code = 11000;
@@ -389,6 +582,18 @@ describe("Monitoring Engine, Scheduler & Worker Endpoint", () => {
       expect(res.body.status).toBe("completed");
       expect(res.body.checked).toBe(1);
       expect(res.body.up).toBe(1);
+      expect(res.body.failed).toBe(0);
+      expect(Array.isArray(res.body.results)).toBe(true);
+      expect(res.body.results[0]).toEqual(
+        expect.objectContaining({
+          monitorId: monitor._id,
+          monitorName: "Worker Probe Target",
+          status: "success",
+          httpStatus: 200,
+        })
+      );
+      expect(JSON.stringify(res.body)).not.toContain(process.env.PINGPILOT_WORKER_SECRET);
+      expect(JSON.stringify(res.body)).not.toContain("8.8.8.8");
     });
 
     test("returns HTTP 409 for concurrent HTTP worker requests so scheduler handles overlap cleanly", async () => {
@@ -451,27 +656,31 @@ describe("Monitoring Engine, Scheduler & Worker Endpoint", () => {
         forceInTest: true,
       });
 
-      // Calling a second time while active returns same handle and logs duplicate warning
-      const stop2 = startRecurringWorker({
-        logger: mockLogger,
-        forceInTest: true,
-      });
-      expect(stop2).toBe(stop1);
-      expect(mockLogger.warn).toHaveBeenCalled();
+      try {
+        // Calling a second time while active returns same handle and logs duplicate warning
+        const stop2 = startRecurringWorker({
+          logger: mockLogger,
+          forceInTest: true,
+        });
+        expect(stop2).toBe(stop1);
+        expect(mockLogger.warn).toHaveBeenCalled();
 
-      // Advance past 15s initial startup delay
-      await jest.advanceTimersByTimeAsync(15000);
+        // Advance past 15s initial startup delay
+        await jest.advanceTimersByTimeAsync(15000);
 
-      expect(global.fetch).toHaveBeenCalledTimes(1);
-      expect(mockLogger.error).not.toHaveBeenCalled();
-      expect(mockLogger.log).toHaveBeenCalledWith(expect.stringContaining("Initial cycle complete"));
+        expect(global.fetch).toHaveBeenCalledTimes(1);
+        expect(mockLogger.error).not.toHaveBeenCalled();
+        expect(mockLogger.log).toHaveBeenCalledWith(expect.stringContaining("Initial cycle complete"));
 
-      stop1();
-      expect(mockLogger.log).toHaveBeenCalledWith(expect.stringContaining("stopped"));
+        stop1();
+        expect(mockLogger.log).toHaveBeenCalledWith(expect.stringContaining("stopped"));
 
-      // Advance timers further; stopped worker must NOT fire again
-      await jest.advanceTimersByTimeAsync(350000);
-      expect(global.fetch).toHaveBeenCalledTimes(1);
+        // Advance timers further; stopped worker must NOT fire again
+        await jest.advanceTimersByTimeAsync(350000);
+        expect(global.fetch).toHaveBeenCalledTimes(1);
+      } finally {
+        stop1();
+      }
     });
 
     test("logs error cleanly during startup cycle failure without unhandled rejection", async () => {
@@ -490,14 +699,142 @@ describe("Monitoring Engine, Scheduler & Worker Endpoint", () => {
         forceInTest: true,
       });
 
-      await jest.advanceTimersByTimeAsync(5000);
+      try {
+        await jest.advanceTimersByTimeAsync(5000);
 
-      expect(mockLogger.error).toHaveBeenCalledWith(
-        "Error in initial monitoring cycle:",
-        "Startup DB error"
+        expect(mockLogger.error).toHaveBeenCalledWith(
+          "Error in initial monitoring cycle:",
+          "Startup DB error"
+        );
+      } finally {
+        stop();
+      }
+    });
+
+    test("disables duplicate in-process scheduler in production unless ENABLE_IN_PROCESS_WORKER is true", () => {
+      const originalNodeEnv = process.env.NODE_ENV;
+      const originalFlag = process.env.ENABLE_IN_PROCESS_WORKER;
+
+      try {
+        process.env.NODE_ENV = "production";
+        delete process.env.ENABLE_IN_PROCESS_WORKER;
+
+        const mockLogger = { log: jest.fn(), warn: jest.fn(), error: jest.fn() };
+        const stop = startRecurringWorker({ logger: mockLogger });
+
+        expect(typeof stop).toBe("function");
+        expect(mockLogger.log).toHaveBeenCalledWith(
+          expect.stringContaining("disabled in production")
+        );
+        stop();
+      } finally {
+        process.env.NODE_ENV = originalNodeEnv;
+        if (originalFlag === undefined) {
+          delete process.env.ENABLE_IN_PROCESS_WORKER;
+        } else {
+          process.env.ENABLE_IN_PROCESS_WORKER = originalFlag;
+        }
+      }
+    });
+  });
+
+  describe("Idempotent Interval Migration Script (migrateMonitorIntervals.js)", () => {
+    test("computes safe defaults without touching valid intervals or monitor history", () => {
+      const now = new Date("2026-11-11T10:00:00.000Z");
+      const lastCheckedAt = new Date("2026-11-11T09:57:00.000Z");
+
+      // Legacy doc with custom interval=10, missing monitoringInterval & nextCheckAt
+      const legacyUpdate = buildMigrationUpdate(
+        {
+          _id: "m1",
+          name: "Legacy 10m",
+          interval: 10,
+          isActive: true,
+          lastCheckedAt,
+        },
+        now
       );
+      expect(legacyUpdate).toEqual({
+        monitoringInterval: 10,
+        nextCheckAt: new Date(lastCheckedAt.getTime() + 10 * 60 * 1000),
+        claimOwner: null,
+        claimExpiresAt: null,
+      });
 
-      stop();
+      // Legacy doc with unsupported interval=3 -> falls back safely to 5
+      const invalidUpdate = buildMigrationUpdate(
+        {
+          _id: "m2",
+          name: "Legacy 3m",
+          interval: 3,
+          isActive: true,
+          lastCheckedAt: null,
+        },
+        now
+      );
+      expect(invalidUpdate).toEqual({
+        monitoringInterval: 5,
+        interval: 5,
+        nextCheckAt: now,
+        claimOwner: null,
+        claimExpiresAt: null,
+      });
+
+      // Second pass on already-migrated document produces empty update (idempotent)
+      const secondPass = buildMigrationUpdate(
+        {
+          _id: "m1",
+          name: "Migrated 10m",
+          monitoringInterval: 10,
+          interval: 10,
+          isActive: true,
+          lastCheckedAt,
+          nextCheckAt: new Date(lastCheckedAt.getTime() + 10 * 60 * 1000),
+          claimOwner: null,
+          claimExpiresAt: null,
+        },
+        now
+      );
+      expect(secondPass).toEqual({});
+    });
+
+    test("supports dry-run and apply modes without deleting monitors or PingResult records", async () => {
+      const now = new Date("2026-11-11T10:00:00.000Z");
+      const docs = [
+        { _id: "mon-1", name: "Unmigrated", interval: 15, isActive: true, lastCheckedAt: null },
+        {
+          _id: "mon-2",
+          name: "Already Migrated",
+          monitoringInterval: 5,
+          interval: 5,
+          isActive: true,
+          nextCheckAt: now,
+          claimOwner: null,
+          claimExpiresAt: null,
+        },
+        { _id: "mon-3", name: "Paused Legacy", interval: 5, isActive: false },
+      ];
+
+      jest.spyOn(Monitor, "find").mockResolvedValue(docs);
+      const updateOneSpy = jest.spyOn(Monitor, "updateOne").mockResolvedValue({ modifiedCount: 1 });
+      const deleteMonitorSpy = jest.spyOn(Monitor, "deleteMany");
+      const deleteHistorySpy = jest.spyOn(PingResult, "deleteMany");
+
+      const mockLogger = { log: jest.fn() };
+      const dryRunResult = await migrateMonitorIntervals({ dryRun: true, now, logger: mockLogger });
+      expect(dryRunResult.dryRun).toBe(true);
+      expect(dryRunResult.totalMonitors).toBe(3);
+      expect(dryRunResult.updatedCount).toBe(2);
+      expect(dryRunResult.unchangedCount).toBe(1);
+      expect(updateOneSpy).not.toHaveBeenCalled();
+
+      const applyResult = await migrateMonitorIntervals({ dryRun: false, now, logger: mockLogger });
+      expect(applyResult.dryRun).toBe(false);
+      expect(applyResult.updatedCount).toBe(2);
+      expect(applyResult.unchangedCount).toBe(1);
+      expect(updateOneSpy).toHaveBeenCalledTimes(2);
+      expect(deleteMonitorSpy).not.toHaveBeenCalled();
+      expect(deleteHistorySpy).not.toHaveBeenCalled();
     });
   });
 });

@@ -246,7 +246,7 @@ export default function MonitorsPage() {
       <Card className="overflow-hidden">
         {loading && monitors.length === 0 ? (
           <div className="p-4">
-            <TableSkeleton rows={5} cols={6} />
+            <TableSkeleton rows={5} cols={7} />
           </div>
         ) : monitors.length === 0 ? (
           <EmptyState

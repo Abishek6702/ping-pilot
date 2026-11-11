@@ -661,6 +661,7 @@ export default function ApiTesterPage() {
           name: getSafeHostname(url),
           url: url ? url.trim() : "",
           method: "GET",
+          monitoringInterval: 5,
           timeout: 15,
           expectedStatusCodes: [200],
           isActive: true,

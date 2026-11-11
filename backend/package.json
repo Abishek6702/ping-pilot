@@ -6,6 +6,7 @@
   "scripts": {
     "start": "node server.js",
     "dev": "nodemon server.js",
+    "migrate:intervals": "node scripts/migrateMonitorIntervals.js",
     "test": "jest --runInBand --detectOpenHandles --forceExit"
   },
   "keywords": [],
